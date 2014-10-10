@@ -8,11 +8,74 @@
 
 //! IPv4 packet abstraction
 
+use std::default::Default;
 use std::fmt;
 use std::io::net::ip::{IpAddr, Ipv4Addr};
 
-use packet::{Packet, MutablePacket};
+use packet::{Packet, MutablePacket, ToPacket};
 use packet::ip::IpNextHeaderProtocol;
+
+
+/// A structure used for construction and matching of IPv4 packets
+pub struct Ipv4 {
+    version: u8,
+    header_length: u8,
+    dscp: u8,
+    ecn: u8,
+    total_length: u16,
+    identification: u16,
+    flags: u8,
+    fragment_offset: u16,
+    ttl: u8,
+    protocol: IpNextHeaderProtocol,
+    checksum: u16,
+    src: IpAddr,
+    dst: IpAddr,
+}
+
+impl Default for Ipv4 {
+    fn default() -> Ipv4 {
+        Ipv4 {
+            version: 0,
+            header_length: 0,
+            dscp: 0,
+            ecn: 0,
+            total_length: 0,
+            identification: 0,
+            flags: 0,
+            fragment_offset: 0,
+            ttl: 0,
+            protocol: IpNextHeaderProtocol(0),
+            checksum: 0,
+            src: Ipv4Addr(0, 0, 0, 0),
+            dst: Ipv4Addr(0, 0, 0, 0)
+        }
+    }
+}
+
+impl<'p> ToPacket<'p, Ipv4Header<'p>> for Ipv4 {
+    fn to_packet(&self, buf: &mut [u8]) {
+        let mut header = MutableIpv4Header::new(buf);
+
+        header.set_version(self.version);
+        header.set_header_length(self.header_length);
+        header.set_dscp(self.dscp);
+        header.set_ecn(self.ecn);
+        header.set_total_length(self.total_length);
+        header.set_identification(self.identification);
+        header.set_flags(self.flags);
+        header.set_fragment_offset(self.fragment_offset);
+        header.set_ttl(self.ttl);
+        header.set_next_level_protocol(self.protocol);
+        header.set_checksum(self.checksum);
+        header.set_source(self.src);
+        header.set_destination(self.dst);
+    }
+
+    fn header_len(&self) -> uint {
+        20
+    }
+}
 
 /// Structure representing an IPv4 header
 pub struct Ipv4Header<'p> {

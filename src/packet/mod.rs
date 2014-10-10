@@ -34,6 +34,53 @@ pub trait MutablePacket {
     }
 }
 
+/// FIXME
+pub struct PacketBuilder<'p> {
+    packet: &'p mut [u8],
+    index: uint
+}
+
+impl<'p> PacketBuilder<'p> {
+    /// FIXME
+    pub fn new(buffer: &'p mut [u8]) -> PacketBuilder<'p> {
+        PacketBuilder { packet: buffer, index: 0 }
+    }
+
+    /// FIXME
+    pub fn append<T : ToPacket<'p, U>, U : Packet>(&'p mut self, packet: T) -> &'p mut PacketBuilder {
+        let index = self.index;
+        packet.to_packet(self.packet.mut_slice_from(index));
+        self.index += packet.header_len();
+
+        self
+    }
+}
+
+impl<'p> Packet for PacketBuilder<'p> {
+    fn packet<'p>(&'p self) -> &'p [u8] { self.packet }
+    fn payload<'p>(&'p self) -> &'p [u8] { self.packet.slice_from(self.index) }
+}
+
+impl<'p> MutablePacket for PacketBuilder<'p> {
+    fn mut_packet<'p>(&'p mut self) -> &'p mut [u8] { self.packet }
+    fn mut_payload<'p>(&'p mut self) -> &'p mut [u8] { self.packet.mut_slice_from(self.index) }
+}
+
+/// FIXME
+pub trait ToPacket<'p, T : Packet> {
+    ///
+    fn to_packet(&self, buffer: &mut [u8]);
+
+    ///
+    fn header_len(&self) -> uint;
+}
+
+/// FIXME
+pub trait FromPacket<T> {
+    ///
+    fn from_packet(&self) -> T;
+}
+
 /// Provides a faux-for loop for packet channels.
 ///
 /// Usage:

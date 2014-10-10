@@ -8,9 +8,43 @@
 
 //! Ethernet packet abstraction
 
+use std::default::Default;
 use std::fmt;
-use packet::{Packet, MutablePacket};
+use packet::{Packet, MutablePacket, ToPacket};
 use util::MacAddr;
+
+/// A structure used for construction and matching of Ethernet packets
+pub struct Ethernet {
+    /// Destination address
+    pub dst: MacAddr,
+    /// Source address
+    pub src: MacAddr,
+    /// EtherType for the packet
+    pub ethertype: EtherType
+}
+
+impl Default for Ethernet {
+    fn default() -> Ethernet {
+        Ethernet {
+            dst: MacAddr(0, 0, 0, 0, 0, 0),
+            src: MacAddr(0, 0, 0, 0, 0, 0),
+            ethertype: EtherType(0)
+        }
+    }
+}
+
+impl<'p> ToPacket<'p, EthernetHeader<'p>> for Ethernet {
+    fn to_packet(&self, buf: &mut [u8]) {
+        let mut header = MutableEthernetHeader::new(buf);
+        header.set_destination(self.dst);
+        header.set_source(self.dst);
+        header.set_ethertype(self.ethertype);
+    }
+
+    fn header_len(&self) -> uint {
+        14
+    }
+}
 
 /// A structure which represents an Ethernet header
 pub struct EthernetHeader<'p> {
