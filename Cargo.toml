@@ -22,10 +22,15 @@ crate_type = [ "rlib", "dylib" ]
 
 default = []
 netmap = ["rust-netmap"]
+dpdk = ["rust-dpdk"]
 
 [dependencies.rust-netmap]
 git = "https://github.com/libpnet/rust-netmap.git"
 features = ["netmap_with_libs"]
+optional = true
+
+[dependencies.rust-dpdk]
+path = "../rust-dpdk"
 optional = true
 
 [dev-dependencies]

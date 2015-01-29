@@ -20,6 +20,7 @@ use util::NetworkInterface;
 mod backend;
 
 #[cfg(all(not(feature = "netmap"),
+          not(feature = "dpdk"),
           target_os = "linux"
           )
       )]
@@ -27,6 +28,7 @@ mod backend;
 mod backend;
 
 #[cfg(all(not(feature = "netmap"),
+          not(feature = "dpdk"),
           any(target_os = "freebsd",
               target_os = "macos")
              )
@@ -34,8 +36,14 @@ mod backend;
 #[path = "bpf.rs"]
 mod backend;
 
-#[cfg(feature = "netmap")]
+#[cfg(all(not(feature = "dpdk"),
+          feature = "netmap"))]
 #[path = "netmap.rs"]
+mod backend;
+
+#[cfg(all(not(feature = "netmap"),
+          feature = "dpdk"))]
+#[path = "dpdk.rs"]
 mod backend;
 
 /// Type of data link channel to present
