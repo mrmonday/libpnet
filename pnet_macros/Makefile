@@ -9,7 +9,7 @@ PNET=$(shell ls target/deps/libpnet*.rlib)
 # Target triple
 TRIPLE=x86_64-unknown-linux-gnu
 # Args for compiletest
-COMPILETEST_ARGS=--compile-lib-path "" --run-lib-path "" --rustc-path $(RUSTC) --src-base tests \
+COMPILETEST_ARGS=--compile-lib-path "" --run-lib-path "" --rustc-path $(RUSTC) --src-base tests/compile-fail \
 				 --build-base target/tests --aux-base tests/aux --stage-id "" \
 				 --android-cross-path "" --target $(TRIPLE) --target-rustcflags \
 				 "--extern pnet=$(PNET) --extern pnet_macros=$(PNET_MACROS)"

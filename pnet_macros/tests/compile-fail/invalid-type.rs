@@ -12,4 +12,8 @@
 extern crate pnet;
 
 #[packet]
-struct Foo(u8); //~ ERROR: all fields in a packet must be named
+struct InvalidType {
+    field: String, //~ ERROR: unsupported field type `String`
+}
+
+fn main(){}

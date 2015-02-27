@@ -11,7 +11,15 @@
 #![feature(core, plugin_registrar, rustc_private)]
 
 extern crate syntax;
+extern crate regex;
 extern crate rustc;
+
+use regex::Regex;
+
+use rustc::plugin::Registry;
+
+use std::fmt;
+use std::num::SignedInt;
 
 use syntax::ast;
 use syntax::codemap::{Span, Spanned};
@@ -22,18 +30,49 @@ use syntax::ext::build::AstBuilder;
 use syntax::ext::quote::rt::ExtParseUtils;
 use syntax::ptr::P;
 
-use rustc::plugin::Registry;
-
+#[derive(Debug, PartialEq, Eq)]
 enum Endianness {
     Big,
     Little
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Copy, Debug, PartialEq, Eq)]
 struct Operation {
     mask: u8,
     shiftl: u8,
     shiftr: u8,
+}
+
+impl fmt::Display for Operation {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        let should_mask = self.mask != 0xFF;
+        let shift = (self.shiftr as i16) - (self.shiftl as i16);
+
+        let mask_str = if should_mask {
+            format!("({{}} & 0x{})", fmt::radix(self.mask, 16))
+        } else {
+            "{}".to_string()
+        };
+
+        if shift == 0 {
+            write!(fmt, "{}", mask_str)
+        } else if shift < 0 {
+            write!(fmt, "{} << {}", mask_str, shift.abs())
+        } else {
+            write!(fmt, "{} >> {}", mask_str, shift.abs())
+        }
+    }
+}
+
+#[test]
+fn test_display_operation() {
+    type Op = Operation;
+
+    assert_eq!(Op { mask: 0b00001111, shiftl: 2, shiftr: 0 }.to_string(), "({} & 0xf) << 2");
+    assert_eq!(Op { mask: 0b00001111, shiftl: 2, shiftr: 2 }.to_string(), "({} & 0xf)");
+    assert_eq!(Op { mask: 0b00001111, shiftl: 0, shiftr: 2 }.to_string(), "({} & 0xf) >> 2");
+    assert_eq!(Op { mask: 0b11111111, shiftl: 0, shiftr: 2 }.to_string(), "{} >> 2");
+    assert_eq!(Op { mask: 0b11111111, shiftl: 3, shiftr: 1 }.to_string(), "{} << 2");
 }
 
 fn mask_high_bits(mut bits: u8) -> u8 {
@@ -113,15 +152,11 @@ fn test_get_mask() {
 }
 
 fn get_shiftl(offset: usize, size: usize, byte_number: usize, num_bytes: usize) -> u8 {
-    //println!("get_shiftl(offset={}, size={}, byte_number={}, num_bytes={})", offset, size, byte_number, num_bytes);
     if num_bytes == 1 || byte_number + 1 == num_bytes {
         0
     } else {
         let base_shift = 8 - ((num_bytes * 8) - offset - size);
         let bytes_to_shift = num_bytes - byte_number - 2;
-
-        //println!("base_shift: {}", base_shift);
-        //println!("bytes_to_shift: {}", bytes_to_shift);
 
         (base_shift + (8 * bytes_to_shift)) as u8
     }
@@ -201,26 +236,19 @@ fn operations(offset: usize, size: usize) -> Option<Vec<Operation>> {
     if offset > 7 || size == 0 || size > 64 {
         return None;
     }
-    //let num_bits = size - offset;
+
     let num_full_bytes = size / 8;
     let num_bytes = if offset > 0 || size % 8 != 0{
                         num_full_bytes + 1
                     } else {
                         num_full_bytes
                     };
-/*    let num_bytes = if size % 8 == 0 {
-                        num_full_bytes
-                    } else {
-                        num_full_bytes + 1
-                    };*/
+
     let mut current_offset = offset;
     let mut num_bits_remaining = size;
     let mut ops = Vec::with_capacity(num_bytes);
     for i in range(0, num_bytes) {
-        //let num_bits = num_bits_remaining / 8;
         let (consumed, mask) = get_mask(current_offset, num_bits_remaining);
-        println!("num_bits_remaining: {}", num_bits_remaining);
-        println!("consumed: {}", consumed);
         ops.push(Operation {
             mask: mask,
             shiftl: get_shiftl(offset, size, i, num_bytes),
@@ -273,10 +301,18 @@ fn operations_test() {
                                                 Op { mask: 0b11111111, shiftl: 4, shiftr: 0 },
                                                 Op { mask: 0b11110000, shiftl: 0, shiftr: 4 }));
 }
-//#[inline(always)]
-//fn get_field<T>(packet: &[u8], offset: usize, size: usize, endianness: Endianness) -> T {
-//    let packet = packet[offset..];
-//}
+
+/// Takes a set of operations to get a field in big endian, and converts them to get the field in
+/// little endian.
+fn to_little_endian(ops: Vec<Operation>) -> Vec<Operation> {
+    unimplemented!()
+}
+
+/// Converts a set of operations which would get a field, to a set of operations which would set
+/// the field
+fn to_mutator(ops: &[Operation]) -> Vec<Operation> {
+    unimplemented!()
+}
 
 #[plugin_registrar]
 pub fn plugin_registrar(registry: &mut Registry) {
@@ -288,22 +324,22 @@ fn generate_packet(ecx: &mut ExtCtxt,
                    span: Span,
                    _meta_item: &ast::MetaItem,
                    item: &ast::Item,
-                   mut push: Box<FnMut(P<ast::Item>)>) {
+                   mut push: &mut FnMut(P<ast::Item>)) {
     match item.node {
         ast::ItemEnum(..) => unimplemented!(),
         ast::ItemStruct(ref sd, ref _gs) => {
             let name = item.ident.as_str().to_string();
-            push(generate_header_struct(ecx, format!("{}Header", name), false));
-            push(generate_header_struct(ecx, format!("Mutable{}Header", name), true));
-
-            // TODO impl Packet for ...
-            let ref fields = sd.fields;
-            for ref field in fields {
-                if let Some(name) = field.node.ident() {
-                    println!("field: {:?}", name.as_str());
-                } else {
-                    ecx.span_err(field.span, "all fields in a packet must be named");
-                }
+            let header = format!("{}Header", name);
+            let mut_header = format!("Mutable{}Header", name);
+            push(generate_header_struct(ecx, &header[..], false));
+            push(generate_header_struct(ecx, &mut_header[..], true));
+            let header_impls = generate_header_impls(ecx, span, &header[..], sd, false);
+            if let Some(hi) = header_impls {
+                push(hi);
+            }
+            let header_impls = generate_header_impls(ecx, span, &mut_header[..], sd, true);
+            if let Some(hi) = header_impls {
+                push(hi);
             }
         },
         _ => {
@@ -312,7 +348,7 @@ fn generate_packet(ecx: &mut ExtCtxt,
     }
 }
 
-fn generate_header_struct(ecx: &mut ExtCtxt, name: String, mut_: bool) -> P<ast::Item> {
+fn generate_header_struct(ecx: &mut ExtCtxt, name: &str, mut_: bool) -> P<ast::Item> {
     let mutable = if mut_ {
         " mut"
     } else {
@@ -323,45 +359,148 @@ fn generate_header_struct(ecx: &mut ExtCtxt, name: String, mut_: bool) -> P<ast:
 struct {}<'p> {{
     packet: &'p{} [u8],
 }}", name, mutable))
-//    let header_name_ident = token::str_to_ident(name.as_slice());
-//    let field = ast::StructField_ {
-//        kind: NamedField(token::str_to_ident("packet"), ast::Visibility::Inherited),
-//        id: ast::DUMMY_NODE_ID,
-//        ty: ty,
-//        attrs: vec!(),
-//    };
-//    let header_fields = ast::StructDef {
-//        fields: vec!(Spanned { node: field, span: span }),
-//        ctor_id: None
-//    };
-//    let lifetime_param = ast::LifetimeDef {
-//        lifetime: ast::Lifetime {
-//            id: ast::DUMMY_NODE_ID,
-//            span: span,
-//            name: token::intern("p"),
-//        },
-//        bounds: vec!(),
-//    };
-//    let generics = ast::Generics {
-//        lifetimes: vec!(lifetime_param),
-//        ty_params: OwnedSlice::empty(),
-//        where_clause: ast::WhereClause {
-//            id: ast::DUMMY_NODE_ID,
-//            predicates: vec!()
-//        }
-//    };
-//
-//    ecx.item_struct_poly(span, header_name_ident, header_fields, generics)
 }
 
-fn generate_header_impls(ecx: &mut ExtCtxt, span: Span, name: String) -> P<ast::Item> {
-    let imp = ecx.parse_item(format!("impl<'a> {name}<'a> {{
-    pub fn new(packet: &'p mut [u8]) -> {name}<'p> {{
-        {name} {{ packet: packet }}
-    }}
-}}", name = name));
+/// Given a type in the form `u([0-9]+)(_be|_le)?`, return a tuple of it's size and endianness
+///
+/// If 1 <= size <= 8, Endianness will be Big.
+fn parse_ty(ty: &str) -> Option<(usize, Endianness)> {
+    let re = Regex::new(r"^u([0-9]+)(_be|_le)?$").unwrap();
+    let iter = match re.captures_iter(ty).next() {
+        Some(c) => c,
+        None => return None,
+    };
+
+    if iter.len() == 3 || iter.len() == 2 {
+        let size = iter.at(1).unwrap();
+        let endianness = if let Some(e) = iter.at(2) {
+            if e == "_be" {
+                Endianness::Big
+            } else {
+                Endianness::Little
+            }
+        } else {
+            Endianness::Big
+        };
+
+        if let Ok(sz) = size.parse() {
+            Some((sz, endianness))
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
+#[test]
+fn test_parse_ty() {
+    assert_eq!(parse_ty("u8"), Some((8, Endianness::Big)));
+    assert_eq!(parse_ty("u21_be"), Some((21, Endianness::Big)));
+    assert_eq!(parse_ty("u21_le"), Some((21, Endianness::Little)));
+    assert_eq!(parse_ty("uab_le"), None);
+    assert_eq!(parse_ty("u21_re"), None);
+    assert_eq!(parse_ty("i21_be"), None);
+}
+
+/// Given the name of a field, and a set of operations required to set that field, return
+/// the Rust code required to set the field
+fn generate_mutator_str(name: &str, ty: &str, operations: &[Operation]) -> String {
+    unimplemented!()
+}
+
+/// Given the name of a field, and a set of operations required to get the value of that field,
+/// return the Rust code required to get the field.
+fn generate_accessor_str(name: &str, ty: &str, offset: usize, operations: &[Operation]) -> String {
+    fn build_return(max: usize) -> String {
+        let mut ret = "".to_string();
+        for i in range(0, max) {
+            ret = ret + format!("b{} | ", i).as_slice();
+        }
+        let new_len = ret.len() - 3;
+        ret.truncate(new_len);
+
+        ret
+    }
+
+    let op_strings = if operations.len() == 1 {
+        let replacement_str = format!("self.packet()[{}]", offset);
+        operations.first().unwrap().to_string().replace("{}", &replacement_str[..])
+    } else {
+        let mut op_strings = "".to_string();
+        for (idx, operation) in operations.iter().enumerate() {
+            let replacement_str = format!("self.packet()[{}]", offset + idx);
+            let operation = operation.to_string().replace("{}", &replacement_str[..]);
+            op_strings = op_strings + format!("let b{} = {};\n", idx, operation).as_slice();
+        }
+        op_strings = op_strings + format!("\n{}\n", build_return(operations.len())).as_slice();
+
+        op_strings
+    };
+
+    let accessor = format!("fn get_{name}(&self) -> {ty} {{
+            {operations}
+            }}", name = name, ty = ty, operations = op_strings);
+
+    accessor
+}
+
+fn generate_header_impls(ecx: &mut ExtCtxt, span: Span, name: &str,
+                         sd: &ast::StructDef, mut_: bool) -> Option<P<ast::Item>> {
 
     // FIXME generate getters/setters
+    // TODO impl Packet for ...
+    let mut bit_offset = 0;
+    let ref fields = sd.fields;
+    let mut accessors = "".to_string();
+    let mut mutators = "".to_string();
+    let mut error = false;
+    for ref field in fields {
+        if let Some(name) = field.node.ident() {
+            if let ast::Ty_::TyPath(_, ref path) = field.node.ty.node {
+                let ty_str = path.segments.iter().last().unwrap().identifier.as_str();
+                println!("field: {:?}", name.as_str());
+                println!("field: {:?}", ty_str);
+                if let Some((size, endianness)) = parse_ty(ty_str) {
+                    // FIXME Don't unwrap
+                    let mut ops = operations(bit_offset, size).unwrap();
+                    if endianness == Endianness::Little {
+                        ops = to_little_endian(ops);
+                    }
+                    if mut_ {
+                        generate_mutator_str(name.as_str(), ty_str, to_mutator(&ops[..]).as_slice());
+                    }
+                    println!("get: {}", generate_accessor_str(name.as_str(), ty_str, bit_offset / 8, ops.as_slice()));
+                } else {
+                    // TODO ERROR
+                }
+            } else {
+                ecx.span_err(field.span, "unsupported field type");
+                error = true;
+            }
+        } else {
+            ecx.span_err(field.span, "all fields in a packet must be named");
+            error = true;
+        }
+    }
 
-    imp
+    if error {
+        return None;
+    }
+
+    let imp = ecx.parse_item(format!("impl<'a> {name}<'a> {{
+    pub fn new<'p>(packet: &'p {mut} [u8]) -> {name}<'p> {{
+        {name} {{ packet: packet }}
+    }}
+
+    {accessors}
+
+    {mutators}
+}}", name = name,
+     mut = if mut_ { "mut"} else { "" },
+     accessors = accessors,
+     mutators = mutators
+     ));
+
+    Some(imp)
 }
