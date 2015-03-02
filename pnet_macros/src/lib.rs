@@ -14,16 +14,19 @@ extern crate syntax;
 extern crate regex;
 extern crate rustc;
 
+use rustc::lint::{LintPassObject};
 use rustc::plugin::Registry;
 
 use syntax::parse::token;
 use syntax::ext::base::{Decorator};
 
 mod decorator;
+mod lint;
 mod util;
 
 #[plugin_registrar]
 pub fn plugin_registrar(registry: &mut Registry) {
     registry.register_syntax_extension(token::intern("packet"),
                                        Decorator(Box::new(decorator::generate_packet)));
+    register.register_lint_pass(Box::new(PacketPass as LintPassObject));
 }
