@@ -308,10 +308,94 @@ fn to_little_endian(ops: Vec<Operation>) -> Vec<Operation> {
     unimplemented!()
 }
 
+#[derive(Copy, Debug, PartialEq, Eq)]
+struct SetOperation {
+    /// Bits to save from old byte
+    save_mask: u8,
+    /// Bits to mask out of value we're setting
+    value_mask: u64,
+    /// Number of places to left shift the value we're setting
+    shiftl: u8,
+    /// Number of places to right shift the value we're setting
+    shiftr: u8,
+}
+
 /// Converts a set of operations which would get a field, to a set of operations which would set
 /// the field
-fn to_mutator(ops: &[Operation]) -> Vec<Operation> {
+///
+/// In the form of (bits to get, bits to set)
+fn to_mutator(ops: &[Operation]) -> Vec<SetOperation> {
+    // save unset, masked bits
+    // switch shiftl and shiftr
+    // value mask 1 | 1 << 1 etc for the number of bits in the word u4/5/n/etc
     unimplemented!()
+}
+
+#[test]
+fn test_to_mutator() {
+    type Op = Operation;
+    type Sop = SetOperation;
+
+    assert_eq!(to_mutator(&[Op { mask: 0b10000000, shiftl: 0, shiftr: 7 }]),
+               vec![Sop { save_mask: 0b01111111, value_mask: 0b00000001, shiftl: 7, shiftr: 0 }]);
+    assert_eq!(to_mutator(&[Op { mask: 0b11000000, shiftl: 0, shiftr: 6 }]),
+               vec![Sop { save_mask: 0b00111111, value_mask: 0b00000011, shiftl: 6, shiftr: 0 }]);
+    assert_eq!(to_mutator(&[Op { mask: 0b11100000, shiftl: 0, shiftr: 5 }]),
+               vec![Sop { save_mask: 0b00011111, value_mask: 0b00000111, shiftl: 5, shiftr: 0 }]);
+    assert_eq!(to_mutator(&[Op { mask: 0b11110000, shiftl: 0, shiftr: 4 }]),
+               vec![Sop { save_mask: 0b00001111, value_mask: 0b00001111, shiftl: 4, shiftr: 0 }]);
+    assert_eq!(to_mutator(&[Op { mask: 0b11111000, shiftl: 0, shiftr: 3 }]),
+               vec![Sop { save_mask: 0b00000111, value_mask: 0b00011111, shiftl: 3, shiftr: 0 }]);
+    assert_eq!(to_mutator(&[Op { mask: 0b11111100, shiftl: 0, shiftr: 2 }]),
+               vec![Sop { save_mask: 0b00000011, value_mask: 0b00111111, shiftl: 2, shiftr: 0 }]);
+    assert_eq!(to_mutator(&[Op { mask: 0b11111110, shiftl: 0, shiftr: 1 }]),
+               vec![Sop { save_mask: 0b00000001, value_mask: 0b01111111, shiftl: 1, shiftr: 0 }]);
+    assert_eq!(to_mutator(&[Op { mask: 0b11111111, shiftl: 0, shiftr: 0 }]),
+               vec![Sop { save_mask: 0b00000000, value_mask: 0b11111111, shiftl: 0, shiftr: 0 }]);
+    assert_eq!(to_mutator(&[Op { mask: 0b11111111, shiftl: 1, shiftr: 0 },
+                            Op { mask: 0b10000000, shiftl: 0, shiftr: 7 }]),
+               vec![Sop { save_mask: 0b00000000, value_mask: 0b111111110, shiftl: 0, shiftr: 1 },
+                    Sop { save_mask: 0b01111111, value_mask: 0b00000001, shiftl: 7, shiftr: 0 }]);
+
+    assert_eq!(to_mutator(&[Op { mask: 0b11111111, shiftl: 2, shiftr: 0 },
+                            Op { mask: 0b11000000, shiftl: 0, shiftr: 6 }]),
+               vec![Sop { save_mask: 0b00000000, value_mask: 0b1111111100, shiftl: 0, shiftr: 2 },
+                    Sop { save_mask: 0b00111111, value_mask: 0b00000011, shiftl: 6, shiftr: 0 }]);
+
+    assert_eq!(to_mutator(&[Op { mask: 0b01000000, shiftl: 0, shiftr: 6 }]),
+               vec![Sop { save_mask: 0b10111111, value_mask: 0b00000001, shiftl: 6, shiftr: 0 }]);
+    assert_eq!(to_mutator(&[Op { mask: 0b01100000, shiftl: 0, shiftr: 5 }]),
+               vec![Sop { save_mask: 0b10011111, value_mask: 0b00000011, shiftl: 5, shiftr: 0 }]);
+    assert_eq!(to_mutator(&[Op { mask: 0b01110000, shiftl: 0, shiftr: 4 }]),
+               vec![Sop { save_mask: 0b10001111, value_mask: 0b00000111, shiftl: 4, shiftr: 0 }]);
+    assert_eq!(to_mutator(&[Op { mask: 0b01111000, shiftl: 0, shiftr: 3 }]),
+               vec![Sop { save_mask: 0b10000111, value_mask: 0b00001111, shiftl: 3, shiftr: 0 }]);
+    assert_eq!(to_mutator(&[Op { mask: 0b01111100, shiftl: 0, shiftr: 2 }]),
+               vec![Sop { save_mask: 0b10000011, value_mask: 0b00011111, shiftl: 2, shiftr: 0 }]);
+    assert_eq!(to_mutator(&[Op { mask: 0b01111110, shiftl: 0, shiftr: 1 }]),
+               vec![Sop { save_mask: 0b10000001, value_mask: 0b00111111, shiftl: 1, shiftr: 0 }]);
+    assert_eq!(to_mutator(&[Op { mask: 0b01111111, shiftl: 0, shiftr: 0 }]),
+               vec![Sop { save_mask: 0b10000000, value_mask: 0b01111111, shiftl: 0, shiftr: 0 }]);
+    assert_eq!(to_mutator(&[Op { mask: 0b01111111, shiftl: 1, shiftr: 0 },
+                            Op { mask: 0b10000000, shiftl: 0, shiftr: 7 }]),
+               vec![Sop { save_mask: 0b10000000, value_mask: 0b11111110, shiftl: 0, shiftr: 1 },
+                    Sop { save_mask: 0b01111111, value_mask: 0b00000001, shiftl: 7, shiftr: 0 }]);
+    assert_eq!(to_mutator(&[Op { mask: 0b01111111, shiftl: 2, shiftr: 0 },
+                            Op { mask: 0b11000000, shiftl: 0, shiftr: 6 }]),
+               vec![Sop { save_mask: 0b10000000, value_mask: 0b0111111100, shiftl: 0, shiftr: 2 },
+                    Sop { save_mask: 0b00111111, value_mask: 0b00000011, shiftl: 6, shiftr: 0 }]);
+
+    assert_eq!(to_mutator(&[Op { mask: 0b00011111, shiftl: 28, shiftr: 0 },
+                            Op { mask: 0b11111111, shiftl: 20, shiftr: 0 },
+                            Op { mask: 0b11111111, shiftl: 12, shiftr: 0 },
+                            Op { mask: 0b11111111, shiftl: 4, shiftr: 0 },
+                            Op { mask: 0b11110000, shiftl: 0, shiftr: 4 }]),
+               vec![Sop { save_mask: 0b11100000, value_mask: 0x1F0000000, shiftl: 0, shiftr: 28 },
+                    Sop { save_mask: 0b00000000, value_mask: 0x00FF00000, shiftl: 0, shiftr: 20 },
+                    Sop { save_mask: 0b00000000, value_mask: 0x0000FF000, shiftl: 0, shiftr: 12 },
+                    Sop { save_mask: 0b00000000, value_mask: 0x000000FF0, shiftl: 0, shiftr: 4 },
+                    Sop { save_mask: 0b00001111, value_mask: 0x00000000F, shiftl: 4, shiftr: 0 }
+               ]);
 }
 
 #[plugin_registrar]
@@ -405,7 +489,7 @@ fn test_parse_ty() {
 
 /// Given the name of a field, and a set of operations required to set that field, return
 /// the Rust code required to set the field
-fn generate_mutator_str(name: &str, ty: &str, operations: &[Operation]) -> String {
+fn generate_mutator_str(name: &str, ty: &str, operations: &[SetOperation]) -> String {
     unimplemented!()
 }
 
