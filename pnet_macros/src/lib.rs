@@ -22,8 +22,7 @@ use std::fmt;
 use std::num::SignedInt;
 
 use syntax::ast;
-use syntax::codemap::{Span, Spanned};
-use syntax::owned_slice::OwnedSlice;
+use syntax::codemap::{Span};
 use syntax::parse::token;
 use syntax::ext::base::{ExtCtxt, Decorator};
 use syntax::ext::build::AstBuilder;
@@ -37,13 +36,13 @@ enum Endianness {
 }
 
 #[derive(Copy, Debug, PartialEq, Eq)]
-struct Operation {
+struct GetOperation {
     mask: u8,
     shiftl: u8,
     shiftr: u8,
 }
 
-impl fmt::Display for Operation {
+impl fmt::Display for GetOperation {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         let should_mask = self.mask != 0xFF;
         let shift = (self.shiftr as i16) - (self.shiftl as i16);
@@ -65,8 +64,8 @@ impl fmt::Display for Operation {
 }
 
 #[test]
-fn test_display_operation() {
-    type Op = Operation;
+fn test_display_get_operation() {
+    type Op = GetOperation;
 
     assert_eq!(Op { mask: 0b00001111, shiftl: 2, shiftr: 0 }.to_string(), "({} & 0xf) << 2");
     assert_eq!(Op { mask: 0b00001111, shiftl: 2, shiftr: 2 }.to_string(), "({} & 0xf)");
@@ -75,20 +74,67 @@ fn test_display_operation() {
     assert_eq!(Op { mask: 0b11111111, shiftl: 3, shiftr: 1 }.to_string(), "{} << 2");
 }
 
-fn mask_high_bits(mut bits: u8) -> u8 {
-    let mut mask = 0;
-    while bits > 0 {
-        mask = mask | (1 << bits);
-        bits -= 1;
-    }
 
-    mask
+#[derive(Copy, Debug, PartialEq, Eq)]
+struct SetOperation {
+    /// Bits to save from old byte
+    save_mask: u8,
+    /// Bits to mask out of value we're setting
+    value_mask: u64,
+    /// Number of places to left shift the value we're setting
+    shiftl: u8,
+    /// Number of places to right shift the value we're setting
+    shiftr: u8,
+}
+
+impl fmt::Display for SetOperation {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        let should_mask = self.value_mask != 0xFF;
+        let should_save = self.save_mask != 0x00;
+        let shift = (self.shiftr as i16) - (self.shiftl as i16);
+
+        let save_str = if should_save {
+            format!("({{packet}} & 0x{})", fmt::radix(self.save_mask, 16))
+        } else {
+            "".to_string()
+        };
+
+        let mask_str = if should_mask {
+            format!("({{val}} & 0x{})", fmt::radix(self.value_mask, 16))
+        } else {
+            "{val}".to_string()
+        };
+
+        let shift_str = if shift == 0 {
+            format!("{}", mask_str)
+        } else if shift < 0 {
+            format!("{} << {}", mask_str, shift.abs())
+        } else {
+            format!("{} >> {}", mask_str, shift.abs())
+        };
+
+        if should_save {
+            write!(fmt, "{{packet}} = {} | ({})", save_str, shift_str)
+        } else {
+            write!(fmt, "{{packet}} = {}", shift_str)
+        }
+    }
+}
+
+#[test]
+fn test_display_set_operation() {
+    type Sop = SetOperation;
+
+    assert_eq!(Sop { save_mask: 0b00000011, value_mask: 0b00001111, shiftl: 2, shiftr: 0 }.to_string(), "{packet} = ({packet} & 0x3) | (({val} & 0xf) << 2)");
+    assert_eq!(Sop { save_mask: 0b11000000, value_mask: 0b00001111, shiftl: 2, shiftr: 2 }.to_string(), "{packet} = ({packet} & 0xc0) | (({val} & 0xf))");
+    assert_eq!(Sop { save_mask: 0b00011100, value_mask: 0b00001111, shiftl: 0, shiftr: 2 }.to_string(), "{packet} = ({packet} & 0x1c) | (({val} & 0xf) >> 2)");
+    assert_eq!(Sop { save_mask: 0b00000000, value_mask: 0b11111111, shiftl: 0, shiftr: 2 }.to_string(), "{packet} = {val} >> 2");
+    assert_eq!(Sop { save_mask: 0b00000011, value_mask: 0b11111111, shiftl: 3, shiftr: 1 }.to_string(), "{packet} = ({packet} & 0x3) | ({val} << 2)");
 }
 
 /// Gets a mask to get bits_remaining bits from offset bits into a byte
 /// If bits_remaining is > 8, it will be truncated as necessary
 fn get_mask(offset: usize, bits_remaining: usize) -> (usize, u8) {
-    println!("get_mask(offset={}, bits_remaining={})", offset, bits_remaining);
     fn bits_remaining_in_byte(offset: usize, bits_remaining: usize) -> usize {
         fn round_down(max_val: usize, val: usize) -> usize {
             if val > max_val {
@@ -105,7 +151,6 @@ fn get_mask(offset: usize, bits_remaining: usize) -> (usize, u8) {
     }
     assert!(offset <= 7);
     let mut num_bits_to_mask = bits_remaining_in_byte(offset, bits_remaining);
-    println!("num_bits_to_mask: {}", num_bits_to_mask);
     assert!(num_bits_to_mask <= 8 - offset);
     let mut mask = 0;
     while num_bits_to_mask > 0 {
@@ -232,7 +277,7 @@ fn test_get_shiftr() {
 ///
 /// Assumes big endian, and that each byte will be masked, then cast to the next power of two
 /// greater than or equal to size bits before shifting. offset should be in the range [0, 7]
-fn operations(offset: usize, size: usize) -> Option<Vec<Operation>> {
+fn operations(offset: usize, size: usize) -> Option<Vec<GetOperation>> {
     if offset > 7 || size == 0 || size > 64 {
         return None;
     }
@@ -249,7 +294,7 @@ fn operations(offset: usize, size: usize) -> Option<Vec<Operation>> {
     let mut ops = Vec::with_capacity(num_bytes);
     for i in range(0, num_bytes) {
         let (consumed, mask) = get_mask(current_offset, num_bits_remaining);
-        ops.push(Operation {
+        ops.push(GetOperation {
             mask: mask,
             shiftl: get_shiftl(offset, size, i, num_bytes),
             shiftr: get_shiftr(offset, size, i, num_bytes),
@@ -265,7 +310,7 @@ fn operations(offset: usize, size: usize) -> Option<Vec<Operation>> {
 
 #[test]
 fn operations_test() {
-    type Op = Operation;
+    type Op = GetOperation;
     assert_eq!(operations(0, 1).unwrap(), vec!(Op { mask: 0b10000000, shiftl: 0, shiftr: 7 }));
     assert_eq!(operations(0, 2).unwrap(), vec!(Op { mask: 0b11000000, shiftl: 0, shiftr: 6 }));
     assert_eq!(operations(0, 3).unwrap(), vec!(Op { mask: 0b11100000, shiftl: 0, shiftr: 5 }));
@@ -304,36 +349,56 @@ fn operations_test() {
 
 /// Takes a set of operations to get a field in big endian, and converts them to get the field in
 /// little endian.
-fn to_little_endian(ops: Vec<Operation>) -> Vec<Operation> {
+fn to_little_endian(ops: Vec<GetOperation>) -> Vec<GetOperation> {
     unimplemented!()
 }
 
-#[derive(Copy, Debug, PartialEq, Eq)]
-struct SetOperation {
-    /// Bits to save from old byte
-    save_mask: u8,
-    /// Bits to mask out of value we're setting
-    value_mask: u64,
-    /// Number of places to left shift the value we're setting
-    shiftl: u8,
-    /// Number of places to right shift the value we're setting
-    shiftr: u8,
+/// Mask `bits` bits of a byte. eg. mask_high_bits(2) == 0b00000011
+fn mask_high_bits(mut bits: u64) -> u64 {
+    let mut mask = 0;
+    while bits > 0 {
+        mask = mask | (1 << (bits - 1));
+        bits -= 1;
+    }
+
+    mask
 }
+
+
+
 
 /// Converts a set of operations which would get a field, to a set of operations which would set
 /// the field
 ///
 /// In the form of (bits to get, bits to set)
-fn to_mutator(ops: &[Operation]) -> Vec<SetOperation> {
-    // save unset, masked bits
-    // switch shiftl and shiftr
-    // value mask 1 | 1 << 1 etc for the number of bits in the word u4/5/n/etc
-    unimplemented!()
+fn to_mutator(ops: &[GetOperation]) -> Vec<SetOperation> {
+    fn num_bits_set(n: u8) -> u64 {
+        let mut count = 0;
+        for i in range(0, 8) {
+            if n & (1 << i) > 0 {
+                count += 1;
+            }
+        }
+
+        count
+    }
+
+    let mut sops = Vec::with_capacity(ops.len());
+    for op in ops {
+        sops.push(SetOperation {
+            save_mask: !op.mask,
+            value_mask: mask_high_bits(num_bits_set(op.mask)) << op.shiftl,
+            shiftl: op.shiftr,
+            shiftr: op.shiftl
+        });
+    }
+
+    sops
 }
 
 #[test]
 fn test_to_mutator() {
-    type Op = Operation;
+    type Op = GetOperation;
     type Sop = SetOperation;
 
     assert_eq!(to_mutator(&[Op { mask: 0b10000000, shiftl: 0, shiftr: 7 }]),
@@ -417,13 +482,36 @@ fn generate_packet(ecx: &mut ExtCtxt,
             let mut_header = format!("Mutable{}Header", name);
             push(generate_header_struct(ecx, &header[..], false));
             push(generate_header_struct(ecx, &mut_header[..], true));
-            let header_impls = generate_header_impls(ecx, span, &header[..], sd, false);
-            if let Some(hi) = header_impls {
-                push(hi);
+
+            if let Some(imp) = generate_packet_impl(ecx, &header[..]) {
+                push(ecx.parse_item("use pnet::old_packet::Packet;".to_string()));
+                push(imp);
+            } else {
+                return;
             }
-            let header_impls = generate_header_impls(ecx, span, &mut_header[..], sd, true);
+            if let Some(imp) = generate_packet_impl(ecx, &mut_header[..]) {
+                push(imp);
+            } else {
+                return;
+            }
+            if let Some(imp) = generate_mut_packet_impl(ecx, &mut_header[..]) {
+                push(ecx.parse_item("use pnet::old_packet::MutablePacket;".to_string()));
+                push(imp);
+            } else {
+                return;
+            }
+
+            let header_impls = generate_header_impls(ecx, &header[..], sd, false);
             if let Some(hi) = header_impls {
                 push(hi);
+            } else {
+                return;
+            }
+            let header_impls = generate_header_impls(ecx, &mut_header[..], sd, true);
+            if let Some(hi) = header_impls {
+                push(hi);
+            } else {
+                return;
             }
         },
         _ => {
@@ -440,7 +528,7 @@ fn generate_header_struct(ecx: &mut ExtCtxt, name: &str, mut_: bool) -> P<ast::I
     };
 
     ecx.parse_item(format!("//#[derive(Copy)] // FIXME?
-struct {}<'p> {{
+pub struct {}<'p> {{
     packet: &'p{} [u8],
 }}", name, mutable))
 }
@@ -489,13 +577,27 @@ fn test_parse_ty() {
 
 /// Given the name of a field, and a set of operations required to set that field, return
 /// the Rust code required to set the field
-fn generate_mutator_str(name: &str, ty: &str, operations: &[SetOperation]) -> String {
-    unimplemented!()
+fn generate_mutator_str(name: &str, ty: &str, offset: usize, operations: &[SetOperation]) -> String {
+    let mut op_strings = "".to_string();
+    for sop in operations {
+        let pkt_replace = format!("self.packet[{}]", offset);
+        let val_replace = "val";
+        let sop = sop.to_string().replace("{packet}", pkt_replace.as_slice())
+                                 .replace("{val}", val_replace);
+        op_strings = op_strings + sop.as_slice() + ";\n";
+    }
+
+    let mutator = format!("#[inline]
+pub fn set_{name}(&mut self, val: {ty}) {{
+    {operations}
+}}", name = name, ty = ty, operations = op_strings);
+
+    mutator
 }
 
 /// Given the name of a field, and a set of operations required to get the value of that field,
 /// return the Rust code required to get the field.
-fn generate_accessor_str(name: &str, ty: &str, offset: usize, operations: &[Operation]) -> String {
+fn generate_accessor_str(name: &str, ty: &str, offset: usize, operations: &[GetOperation]) -> String {
     fn build_return(max: usize) -> String {
         let mut ret = "".to_string();
         for i in range(0, max) {
@@ -522,17 +624,41 @@ fn generate_accessor_str(name: &str, ty: &str, offset: usize, operations: &[Oper
         op_strings
     };
 
-    let accessor = format!("fn get_{name}(&self) -> {ty} {{
-            {operations}
-            }}", name = name, ty = ty, operations = op_strings);
+    let accessor = format!("#[inline]
+pub fn get_{name}(&self) -> {ty} {{
+    {operations}
+}}", name = name, ty = ty, operations = op_strings);
 
     accessor
 }
 
-fn generate_header_impls(ecx: &mut ExtCtxt, span: Span, name: &str,
+fn generate_packet_impl(ecx: &mut ExtCtxt, name: &str) -> Option<P<ast::Item>> {
+    let item = ecx.parse_item(format!("impl<'a> Packet for {name}<'a> {{
+        #[inline]
+        fn packet<'p>(&'p self) -> &'p [u8] {{ self.packet.as_slice() }}
+
+        #[inline]
+        fn payload<'p>(&'p self) -> &'p [u8] {{ unimplemented!(); /* FIXME */ }}
+    }}", name = name));
+
+    Some(item)
+}
+
+fn generate_mut_packet_impl(ecx: &mut ExtCtxt, name: &str) -> Option<P<ast::Item>> {
+    let item = ecx.parse_item(format!("impl<'a> MutablePacket for {name}<'a> {{
+        #[inline]
+        fn packet_mut<'p>(&'p mut self) -> &'p mut [u8] {{ self.packet.as_mut_slice() }}
+
+        #[inline]
+        fn payload_mut<'p>(&'p mut self) -> &'p mut [u8] {{ unimplemented!(); /* FIXME */ }}
+    }}", name = name));
+
+    Some(item)
+}
+
+fn generate_header_impls(ecx: &mut ExtCtxt, name: &str,
                          sd: &ast::StructDef, mut_: bool) -> Option<P<ast::Item>> {
 
-    // FIXME generate getters/setters
     // TODO impl Packet for ...
     let mut bit_offset = 0;
     let ref fields = sd.fields;
@@ -543,8 +669,6 @@ fn generate_header_impls(ecx: &mut ExtCtxt, span: Span, name: &str,
         if let Some(name) = field.node.ident() {
             if let ast::Ty_::TyPath(_, ref path) = field.node.ty.node {
                 let ty_str = path.segments.iter().last().unwrap().identifier.as_str();
-                println!("field: {:?}", name.as_str());
-                println!("field: {:?}", ty_str);
                 if let Some((size, endianness)) = parse_ty(ty_str) {
                     // FIXME Don't unwrap
                     let mut ops = operations(bit_offset, size).unwrap();
@@ -552,11 +676,13 @@ fn generate_header_impls(ecx: &mut ExtCtxt, span: Span, name: &str,
                         ops = to_little_endian(ops);
                     }
                     if mut_ {
-                        generate_mutator_str(name.as_str(), ty_str, to_mutator(&ops[..]).as_slice());
+                        mutators = mutators + generate_mutator_str(name.as_str(), ty_str, bit_offset / 8, to_mutator(&ops[..]).as_slice()).as_slice();
                     }
-                    println!("get: {}", generate_accessor_str(name.as_str(), ty_str, bit_offset / 8, ops.as_slice()));
+                    accessors = accessors + generate_accessor_str(name.as_str(), ty_str, bit_offset / 8, ops.as_slice()).as_slice();
+                    bit_offset += size;
                 } else {
-                    // TODO ERROR
+                    ecx.span_err(field.span, format!("unsupported field type `{}`", ty_str).as_slice());
+                    error = true;
                 }
             } else {
                 ecx.span_err(field.span, "unsupported field type");

@@ -12,4 +12,4 @@
 extern crate pnet;
 
 #[packet]
-struct Foo(u8); //~ ERROR: all fields in a packet must be named
+pub struct Foo(pub u8); //~ ERROR all fields in a packet must be named

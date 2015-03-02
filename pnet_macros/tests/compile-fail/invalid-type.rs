@@ -12,8 +12,8 @@
 extern crate pnet;
 
 #[packet]
-struct InvalidType {
-    field: String, //~ ERROR: unsupported field type `String`
+pub struct InvalidType {
+    pub field: String, //~ ERROR: unsupported field type `String`
 }
 
 fn main(){}
