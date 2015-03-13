@@ -11,17 +11,37 @@
 use syntax::ast;
 use syntax::parse::token;
 use rustc::lint::{Context, LintPass, LintPassObject, LintArray};
+use rustc::middle::ty::{node_id_to_type_opt, ty_to_def_id};
 use rustc::plugin::Registry;
 
-declare_lint!(PACKET_LINT, Forbid, "Additional type checking for #[packet] structs and enums");
+declare_lint! {
+    PACKET_LINT,
+    Forbid,
+    "additional type checking for #[packet] structs and enums"
+}
 
 pub struct PacketPass;
 
-impl LintPass for Pass {
+impl LintPass for PacketPass {
     fn get_lints(&self) -> LintArray {
         lint_array!(PACKET_LINT)
     }
-    fn check_item(&mut self, ctxt: &Context, item: &Item) {
+    fn check_item(&mut self, ctxt: &Context, item: &ast::Item) {
+        //println!("item: {}", item.ident.as_str().to_string());
+        if let Some(nid) = node_id_to_type_opt(ctxt.tcx, item.id) {
+            //println!("has nid");
+            if let Some(def_id) = ty_to_def_id(nid) {
+            //println!("has did");
+            //    println!("impls {:?}", ctxt.tcx.trait_impls.borrow().get(&def_id));
+            } else {
+            //println!("no did");
+            }
+        } else {
+            //println!("no nid");
+
+        }
+        //println!("traits: {:?}", ctxt.tcx.trait_defs);
+        //println!("attrs: {:?}", item.attrs);
         // Find any structs/enums marked as #[packet],
         // for each member field, ensure that either:
         //  * it's a u<N>_<be/le>, or

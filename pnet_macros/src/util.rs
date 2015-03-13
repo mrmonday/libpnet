@@ -264,7 +264,7 @@ pub fn operations(offset: usize, size: usize) -> Option<Vec<GetOperation>> {
     }
 
     let num_full_bytes = size / 8;
-    let num_bytes = if offset > 0 || size % 8 != 0{
+    let num_bytes = if offset > 0 || size % 8 != 0 {
                         num_full_bytes + 1
                     } else {
                         num_full_bytes

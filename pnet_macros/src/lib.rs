@@ -12,21 +12,42 @@
 
 extern crate syntax;
 extern crate regex;
-extern crate rustc;
+#[macro_use] extern crate rustc;
 
 use rustc::lint::{LintPassObject};
 use rustc::plugin::Registry;
 
+use syntax::ast;
+use syntax::codemap::{Span};
 use syntax::parse::token;
-use syntax::ext::base::{Decorator};
+use syntax::ext::base::{Decorator, ExtCtxt, Modifier};
+use syntax::ptr::P;
 
 mod decorator;
 mod lint;
 mod util;
 
+pub fn dummy_decorator(_ecx: &mut ExtCtxt,
+                   _span: Span,
+                   _meta_item: &ast::MetaItem,
+                   _item: &ast::Item,
+                   mut _push: &mut FnMut(P<ast::Item>)) {
+    //_ecx.span_err(_span, "grumble");
+}
+
+pub fn dummy_modifier(_ecx: &mut ExtCtxt,
+                   _span: Span,
+                   _meta_item: &ast::MetaItem,
+                   item: P<ast::Item>) -> P<ast::Item> {
+    item.clone()
+}
+
 #[plugin_registrar]
 pub fn plugin_registrar(registry: &mut Registry) {
+    //registry.register_syntax_extension(token::intern("payload"),
+    //                                   Decorator(Box::new(dummy_decorator)));
     registry.register_syntax_extension(token::intern("packet"),
                                        Decorator(Box::new(decorator::generate_packet)));
-    register.register_lint_pass(Box::new(PacketPass as LintPassObject));
+
+    //registry.register_lint_pass(Box::new(lint::PacketPass) as LintPassObject);
 }
