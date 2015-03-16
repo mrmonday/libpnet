@@ -42,13 +42,13 @@ pub fn generate_packet(ecx: &mut ExtCtxt,
 
             let mut payload_bounds = None;
 
-            let header_impls = generate_header_impls(ecx, &header[..], sd, false, &mut payload_bounds);
+            let header_impls = generate_header_impls(ecx, &header[..], &header[..], sd, false, &mut payload_bounds);
             match header_impls {
                 Some(hi) => push(hi),
                 _ => { println!("nope1"); return },
             }
 
-            let header_impls = generate_header_impls(ecx, &mut_header[..], sd, true, &mut payload_bounds);
+            let header_impls = generate_header_impls(ecx, &mut_header[..], &header[..], sd, true, &mut payload_bounds);
             match header_impls {
                 Some(hi) => push(hi),
                 _ => { println!("nope2"); return },
@@ -199,32 +199,57 @@ pub fn get_{name}(&self) -> {ty} {{
 fn generate_packet_impl(ecx: &mut ExtCtxt, name: &str, payload_bounds: &PayloadBounds)
     -> Option<P<ast::Item>>
 {
+    let mut pre = "".to_string();
+    let mut start = "".to_string();
+    let mut end = "".to_string();
+    if payload_bounds.lower.len() > 0 {
+        pre = pre + format!("let start = {};", payload_bounds.lower).as_slice();
+        start = "start".to_string();
+    }
+    if payload_bounds.upper.len() > 0 {
+        pre = pre + format!("let end = {};", payload_bounds.upper).as_slice();
+        end = "end".to_string();
+    }
     let item = ecx.parse_item(format!("impl<'a> Packet for {name}<'a> {{
         #[inline]
         fn packet<'p>(&'p self) -> &'p [u8] {{ self.packet.as_slice() }}
 
         #[inline]
         fn payload<'p>(&'p self) -> &'p [u8] {{
+            {pre}
             &self.packet.as_slice()[{start}..{end}]
         }}
-    }}", name = name, start = payload_bounds.lower, end = payload_bounds.upper));
+    }}", name = name, start = start, end = end, pre = pre));
 
     Some(item)
 }
 
 // FIXME Use quote_item! for all of these things
+// FIXME Merge this with above
 fn generate_mut_packet_impl(ecx: &mut ExtCtxt, name: &str, payload_bounds: &PayloadBounds)
     -> Option<P<ast::Item>>
 {
+    let mut pre = "".to_string();
+    let mut start = "".to_string();
+    let mut end = "".to_string();
+    if payload_bounds.lower.len() > 0 {
+        pre = pre + format!("let start = {};", payload_bounds.lower).as_slice();
+        start = "start".to_string();
+    }
+    if payload_bounds.upper.len() > 0 {
+        pre = pre + format!("let end = {};", payload_bounds.upper).as_slice();
+        end = "end".to_string();
+    }
     let item = ecx.parse_item(format!("impl<'a> MutablePacket for {name}<'a> {{
         #[inline]
         fn packet_mut<'p>(&'p mut self) -> &'p mut [u8] {{ self.packet.as_mut_slice() }}
 
         #[inline]
         fn payload_mut<'p>(&'p mut self) -> &'p mut [u8] {{
+            {pre}
             &mut self.packet.as_mut_slice()[{start}..{end}]
         }}
-    }}", name = name, start = payload_bounds.lower, end = payload_bounds.upper));
+    }}", name = name, start = start, end = end, pre = pre));
 
     Some(item)
 }
@@ -237,11 +262,11 @@ fn current_offset(bit_offset: usize, offset_fns: &[String]) -> String {
     };
 
     offset_fns.iter().fold(base_offset.to_string(), |a, b| {
-        a + " + " + b.as_slice() + "(&self)"
+        a + " + " + b.as_slice() + "(&self.to_immutable())"
     })
 }
 
-fn generate_header_impls(ecx: &mut ExtCtxt, name: &str,
+fn generate_header_impls(ecx: &mut ExtCtxt, name: &str, imm_name: &str,
                          sd: &ast::StructDef, mut_: bool, payload_fn: &mut Option<PayloadBounds>) -> Option<P<ast::Item>> {
 
     let mut bit_offset = 0;
@@ -262,10 +287,11 @@ fn generate_header_impls(ecx: &mut ExtCtxt, name: &str,
                     let ref node = b.node.value.node;
                     match node {
                         &ast::MetaNameValue(ref s, ref lit) => if s.as_slice() == "length_fn" {
-                            match lit.node {
-                                ast::LitStr(s, _) => {
+                            let ref node = lit.node;
+                            match node {
+                                &ast::LitStr(ref s, _) => {
                                     // FIXME Do we need to check the style (snd lit.node)?
-                                    (true, s.to_string())
+                                    (true, Some(s.to_string()))
                                 },
                                 _ => {
                                     ecx.span_err(field.span, "#[length_fn] should be used as #[length_fn = \"name_of_function\"]");
@@ -291,18 +317,21 @@ fn generate_header_impls(ecx: &mut ExtCtxt, name: &str,
                 }
             }).count() > 0;
             if is_payload {
+                println!("this field is a payload");
                 let mut upper_bound_str = "".to_string();
                 if has_length_fn {
-                    upper_bound_str = format!(" + {}(&self)", length_fn);
+                println!("with a length fn");
+                    upper_bound_str = format!("{} + {}(&self.to_immutable())", co.clone(), length_fn.as_ref().unwrap());
                 } else {
-                    if idx != fields.len() {
+                println!("without a length fn");
+                    if idx != fields.len() - 1 {
                         ecx.span_err(field.span, "#[payload] must specify a #[length_fn], unless it is the last field of a packet");
+                        error = true;
                     }
-                    error = true;
                 }
                 *payload_fn = Some(PayloadBounds {
                     lower: co.clone(),
-                    upper: co.clone() + upper_bound_str.as_str(),
+                    upper: upper_bound_str,
                 });
             }
             if let ast::Ty_::TyPath(_, ref path) = field.node.ty.node {
@@ -332,7 +361,7 @@ fn generate_header_impls(ecx: &mut ExtCtxt, name: &str,
                 //error = true;
             }
             if has_length_fn {
-                offset_fns.push(length_fn);
+                offset_fns.push(length_fn.unwrap());
             }
         } else {
             ecx.span_err(field.span, "all fields in a packet must be named");
@@ -349,10 +378,17 @@ fn generate_header_impls(ecx: &mut ExtCtxt, name: &str,
         {name} {{ packet: packet }}
     }}
 
+    pub fn to_immutable<'p>(&'p self) -> {imm_name}<'p> {{
+        match *self {{
+            {name} {{ ref packet }} => {imm_name} {{ packet: packet }}
+        }}
+    }}
+
     {accessors}
 
     {mutators}
 }}", name = name,
+     imm_name = imm_name,
      mut = if mut_ { "mut"} else { "" },
      accessors = accessors,
      mutators = mutators

@@ -12,6 +12,8 @@
 extern crate pnet;
 
 #[packet]
-pub struct Foo(pub u8); //~ ERROR all fields in a packet must be named
+struct Test { //~ ERROR: #[packet]'s must contain a payload
+    banana: u8
+}
 
 fn main() {}

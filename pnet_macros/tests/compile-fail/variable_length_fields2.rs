@@ -6,12 +6,22 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![feature(plugin)]
+#![feature(custom_attribute, plugin)]
 #![plugin(pnet_macros)]
 
 extern crate pnet;
 
 #[packet]
-pub struct Foo(pub u8); //~ ERROR all fields in a packet must be named
+struct PacketWithPayload<'a> {
+    banana: u8,
+    #[length_fn = "length_fn"]
+    var_length: &'a [u8], //~ ERROR: length_fn must be of type &PacketWithPayloadHeader -> usize
+    #[payload]
+    payload: &'a [u8]
+}
+
+fn length_fn() -> usize {
+    unimplemented!()
+}
 
 fn main() {}
