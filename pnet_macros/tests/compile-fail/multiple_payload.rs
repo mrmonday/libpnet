@@ -13,13 +13,11 @@ extern crate pnet;
 
 #[packet]
 struct PacketWithPayload<'a> {
-    banana: u8,
-    #[length_fn = "length_fn"]
-    var_length: &'a [u8],
+    #[length_fn = ""]
     #[payload]
-    payload: &'a [u8]
+    payload1: &'a [u8],  //~ NOTE first payload defined here
+    #[payload]
+    payload2: &'a [u8]   //~ ERROR packet may not have multiple payloads
 }
 
-fn length_fn(_: &PacketWithPayloadPacket) -> usize {
-    unimplemented!()
-}
+

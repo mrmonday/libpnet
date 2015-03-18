@@ -16,9 +16,10 @@ struct PacketWithPayload2<'a> {
     banana: u8,
     #[payload(length_fn = "length_of_payload")]
     payload: &'a [u8] //~ ERROR: #[payload] attribute has no arguments
+    //~^ ERROR: variable length field must have #[length_fn = ""] attribute
 }
 
-fn length_of_payload(_: &PacketWithPayload2) -> usize {
+fn length_of_payload(_: &PacketWithPayload2Packet) -> usize {
     // FIXME
     unimplemented!()
 }
