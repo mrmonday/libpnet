@@ -10,14 +10,61 @@
 
 use regex::Regex;
 
+use std::io;
+
 use syntax::ast;
+use syntax::codemap;
 use syntax::codemap::{Span};
+use syntax::diagnostic;
 use syntax::ext::base::{ExtCtxt};
 use syntax::ext::build::AstBuilder;
 use syntax::ext::quote::rt::ExtParseUtils;
+use syntax::parse;
 use syntax::ptr::P;
 
 use util::{Endianness, GetOperation, SetOperation, to_little_endian, operations, to_mutator};
+
+struct NullWriter;
+
+impl io::Write for NullWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        println!("write got called!");
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+struct NullEmitter;
+
+impl diagnostic::Emitter for NullEmitter {
+    fn emit(&mut self,
+            _cmsp: Option<(&codemap::CodeMap, Span)>,
+            _msg: &str,
+            _code: Option<&str>,
+            _lvl: diagnostic::Level) {
+    }
+    fn custom_emit(&mut self,
+                   _cm: &codemap::CodeMap,
+                   _sp: diagnostic::RenderSpan,
+                   _msg: &str,
+                   _lvl: diagnostic::Level) {
+    }
+}
+
+fn null_parse_item(ecx: &mut ExtCtxt, s: String) -> Option<P<ast::Item>> {
+    //let sh = diagnostic::mk_span_handler(diagnostic::mk_handler(true, Box::new(NullEmitter)),
+    let ew = diagnostic::EmitterWriter::new(Box::new(NullWriter), None);
+    let sh = diagnostic::mk_span_handler(diagnostic::mk_handler(true, Box::new(ew)),
+                                         codemap::CodeMap::new());
+    let sess = parse::new_parse_sess_special_handler(sh);
+
+    //println!("ecx cfg: {:?}", ecx.cfg());
+    //println!("ecx sess: {:?}", ecx.parse_sess());
+
+    parse::parse_item_from_source_str("<quote expansion>".to_string(), s, ecx.cfg(), &sess)
+}
 
 /// Lower and upper bounds of a payload
 /// Represented as strings since they may involve functions.
@@ -60,7 +107,7 @@ pub fn generate_packet(ecx: &mut ExtCtxt,
                 push(ecx.parse_item("use pnet::old_packet::Packet;".to_string()));
                 push(imp);
             } else {
-                println!("blargh");
+                ecx.span_err(span, "length_fn must be of type &PacketWithPayloadHeader -> usize");
                 return;
             }
             if let Some(imp) = generate_packet_impl(ecx, &mut_header[..], &payload_bounds, false) {
@@ -214,7 +261,7 @@ fn generate_packet_impl(ecx: &mut ExtCtxt, name: &str, payload_bounds: &PayloadB
     } else {
         ("", "", "")
     };
-    let item = ecx.parse_item(format!("impl<'a> {mutable}Packet for {name}<'a> {{
+    let item = null_parse_item(ecx, format!("impl<'a> {mutable}Packet for {name}<'a> {{
         #[inline]
         fn packet{u_mut}<'p>(&'p {mut_} self) -> &'p {mut_} [u8] {{ &{mut_} self.packet[..] }}
 
@@ -225,7 +272,7 @@ fn generate_packet_impl(ecx: &mut ExtCtxt, name: &str, payload_bounds: &PayloadB
         }}
     }}", name = name, start = start, end = end, pre = pre, mutable = mutable, u_mut = u_mut, mut_ = mut_));
 
-    Some(item)
+    item
 }
 
 fn current_offset(bit_offset: usize, offset_fns: &[String]) -> String {

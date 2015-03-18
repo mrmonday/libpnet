@@ -23,6 +23,10 @@ declare_lint! {
 
 pub struct PacketPass;
 
+fn get_attr<'a>(attrs: &'a [ast::Attribute], name: &str) -> &'a ast::MetaItem_ {
+    &attrs.iter().filter(|a| a.check_name(name)).nth(0).unwrap().node.value.node
+}
+
 fn has_attr(attrs: &[ast::Attribute], name: &str) -> bool {
     attrs.iter().filter(|a| a.check_name(name)).count() != 0
 }
@@ -30,7 +34,19 @@ fn has_attr(attrs: &[ast::Attribute], name: &str) -> bool {
 fn check_struct(ctxt: &Context, sd: &ast::StructDef) {
     let fields = &sd.fields;
     for ref field in fields {
-        if has_attr(&field.node.attrs[..], "payload") {
+        if has_attr(&field.node.attrs[..], "length_fn") {
+            match get_attr(&field.node.attrs[..], "length_fn") {
+                &ast::MetaNameValue(ref s, ref lit) => {
+                    let ref node = lit.node;
+                    match node {
+                        &ast::LitStr(ref s, _) => {
+                            //s.to_string()
+                        },
+                        _ => panic!("this should be caught before linting")
+                    }
+                },
+                _ => panic!("this should be caught before linting")
+            }
         }
         println!("field: {}", field.node.ident().unwrap());
         println!("field ty: {:?}", field.node.ty.node);
@@ -49,8 +65,6 @@ impl LintPass for PacketPass {
         //  * it's a type made of up the above
         // make sure there's some way for the decorator pass to know the size/how
         // to convert it
-        //
-        // Ensure that there's a #[payload] field which is a slice/
 
         if item.attrs.iter().filter(|a| a.check_name("_packet_lint")).count() == 0 {
             return;
