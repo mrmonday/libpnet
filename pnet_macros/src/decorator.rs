@@ -42,13 +42,13 @@ pub fn generate_packet(ecx: &mut ExtCtxt,
 
             let mut payload_bounds = None;
 
-            let header_impls = generate_header_impls(ecx, &header[..], &header[..], sd, false, &mut payload_bounds);
+            let header_impls = generate_header_impls(ecx, &span, &header[..], &header[..], sd, false, &mut payload_bounds);
             match header_impls {
                 Some(hi) => push(hi),
                 _ => { println!("nope1"); return },
             }
 
-            let header_impls = generate_header_impls(ecx, &mut_header[..], &header[..], sd, true, &mut payload_bounds);
+            let header_impls = generate_header_impls(ecx, &span, &mut_header[..], &header[..], sd, true, &mut payload_bounds);
             match header_impls {
                 Some(hi) => push(hi),
                 _ => { println!("nope2"); return },
@@ -266,7 +266,7 @@ fn current_offset(bit_offset: usize, offset_fns: &[String]) -> String {
     })
 }
 
-fn generate_header_impls(ecx: &mut ExtCtxt, name: &str, imm_name: &str,
+fn generate_header_impls(ecx: &mut ExtCtxt, span: &Span, name: &str, imm_name: &str,
                          sd: &ast::StructDef, mut_: bool, payload_fn: &mut Option<PayloadBounds>) -> Option<P<ast::Item>> {
 
     let mut bit_offset = 0;
@@ -275,6 +275,7 @@ fn generate_header_impls(ecx: &mut ExtCtxt, name: &str, imm_name: &str,
     let mut accessors = "".to_string();
     let mut mutators = "".to_string();
     let mut error = false;
+    let mut found_payload = false;
     for (idx, ref field) in fields.iter().enumerate() {
         //println!("field: {:?}", field);
 
@@ -317,13 +318,11 @@ fn generate_header_impls(ecx: &mut ExtCtxt, name: &str, imm_name: &str,
                 }
             }).count() > 0;
             if is_payload {
-                println!("this field is a payload");
+                found_payload = true;
                 let mut upper_bound_str = "".to_string();
                 if has_length_fn {
-                println!("with a length fn");
                     upper_bound_str = format!("{} + {}(&self.to_immutable())", co.clone(), length_fn.as_ref().unwrap());
                 } else {
-                println!("without a length fn");
                     if idx != fields.len() - 1 {
                         ecx.span_err(field.span, "#[payload] must specify a #[length_fn], unless it is the last field of a packet");
                         error = true;
@@ -367,6 +366,11 @@ fn generate_header_impls(ecx: &mut ExtCtxt, name: &str, imm_name: &str,
             ecx.span_err(field.span, "all fields in a packet must be named");
             error = true;
         }
+    }
+
+    if !found_payload {
+        ecx.span_err(*span, "#[packet]'s must contain a payload");
+        return None;
     }
 
     if error {

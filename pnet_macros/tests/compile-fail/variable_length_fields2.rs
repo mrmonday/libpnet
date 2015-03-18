@@ -20,7 +20,7 @@ struct PacketWithPayload<'a> {
     payload: &'a [u8]
 }
 
-fn length_fn() -> usize {
+fn length_fn(_: &PacketWithPayloadHeader) -> usize {
     unimplemented!()
 }
 

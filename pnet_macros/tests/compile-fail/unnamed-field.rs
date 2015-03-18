@@ -6,12 +6,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![feature(plugin)]
+#![feature(custom_attribute, plugin)]
 #![plugin(pnet_macros)]
 
 extern crate pnet;
 
-#[packet]
+#[packet] //~ ERROR: #[packet]'s must contain a payload
 pub struct Foo(pub u8); //~ ERROR all fields in a packet must be named
 
 fn main() {}

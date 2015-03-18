@@ -6,13 +6,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![feature(plugin)]
+#![feature(custom_attribute, plugin)]
 #![plugin(pnet_macros)]
 
 extern crate pnet;
 
-#[packet]
-struct Test { //~ ERROR: #[packet]'s must contain a payload
+#[packet] //~ ERROR: #[packet]'s must contain a payload
+struct Test {
     banana: u8
 }
 
