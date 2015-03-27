@@ -108,7 +108,7 @@ fn test_display_set_operation() {
 
     assert_eq!(Sop { save_mask: 0b00000011, value_mask: 0b00001111, shiftl: 2, shiftr: 0 }.to_string(), "{packet} = (({packet} & 0x3) | (({val} & 0xf) << 2) as u8) as u8");
     assert_eq!(Sop { save_mask: 0b11000000, value_mask: 0b00001111, shiftl: 2, shiftr: 2 }.to_string(), "{packet} = (({packet} & 0xc0) | (({val} & 0xf)) as u8) as u8");
-    assert_eq!(Sop { save_mask: 0b00011100, value_mask: 0b00001111, shiftl: 0, shiftr: 2 }.to_string(), "{packet} = (({packet} & 0x1c) | (({val} & 0xf) >> 2) as u8");
+    assert_eq!(Sop { save_mask: 0b00011100, value_mask: 0b00001111, shiftl: 0, shiftr: 2 }.to_string(), "{packet} = (({packet} & 0x1c) | (({val} & 0xf) >> 2) as u8) as u8");
     assert_eq!(Sop { save_mask: 0b00000000, value_mask: 0b11111111, shiftl: 0, shiftr: 2 }.to_string(), "{packet} = ({val} >> 2) as u8");
     assert_eq!(Sop { save_mask: 0b00000011, value_mask: 0b11111111, shiftl: 3, shiftr: 1 }.to_string(), "{packet} = (({packet} & 0x3) | ({val} << 2) as u8) as u8");
 }
@@ -184,7 +184,10 @@ fn get_shiftl(offset: usize, size: usize, byte_number: usize, num_bytes: usize) 
         let base_shift = 8 - ((num_bytes * 8) - offset - size);
         let bytes_to_shift = num_bytes - byte_number - 2;
 
-        (base_shift + (8 * bytes_to_shift)) as u8
+        let ret = base_shift + (8 * bytes_to_shift);
+
+        //(ret % 8) as u8
+        ret as u8
     }
 }
 

@@ -13,7 +13,7 @@ use syntax::attr::AttrMetaMethods;
 use syntax::parse::token;
 use rustc::lint::{Context, LintPass, LintPassObject, LintArray};
 use rustc::middle::ty::{node_id_to_type_opt, ty_to_def_id};
-use rustc::plugin::Registry;
+//use rustc::plugin::Registry;
 
 declare_lint! {
     PACKET_LINT,
@@ -32,25 +32,25 @@ fn has_attr(attrs: &[ast::Attribute], name: &str) -> bool {
 }
 
 fn check_struct(ctxt: &Context, sd: &ast::StructDef) {
-    let fields = &sd.fields;
-    for ref field in fields {
-        if has_attr(&field.node.attrs[..], "length_fn") {
-            match get_attr(&field.node.attrs[..], "length_fn") {
-                &ast::MetaNameValue(ref s, ref lit) => {
-                    let ref node = lit.node;
-                    match node {
-                        &ast::LitStr(ref s, _) => {
-                            //s.to_string()
-                        },
-                        _ => panic!("this should be caught before linting")
-                    }
-                },
-                _ => panic!("this should be caught before linting")
-            }
-        }
-        println!("field: {}", field.node.ident().unwrap());
-        println!("field ty: {:?}", field.node.ty.node);
-    }
+    //let fields = &sd.fields;
+    //for ref field in fields {
+    //    if has_attr(&field.node.attrs[..], "length_fn") {
+    //        match get_attr(&field.node.attrs[..], "length_fn") {
+    //            &ast::MetaNameValue(ref s, ref lit) => {
+    //                let ref node = lit.node;
+    //                match node {
+    //                    &ast::LitStr(ref s, _) => {
+    //                        //s.to_string()
+    //                    },
+    //                    _ => panic!("this should be caught before linting")
+    //                }
+    //            },
+    //            _ => panic!("this should be caught before linting")
+    //        }
+    //    }
+    //    //println!("field: {}", field.node.ident().unwrap());
+    //    //println!("field ty: {:?}", field.node.ty.node);
+    //}
 }
 
 impl LintPass for PacketPass {
@@ -69,7 +69,7 @@ impl LintPass for PacketPass {
         if item.attrs.iter().filter(|a| a.check_name("_packet_lint")).count() == 0 {
             return;
         }
-        println!("item: {}", item.ident.as_str().to_string());
+        //println!("item: {}", item.ident.as_str().to_string());
         match item.node {
             ast::ItemEnum(..) => unimplemented!(),
             ast::ItemStruct(ref sd, ref _gs) => {

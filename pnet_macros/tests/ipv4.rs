@@ -19,7 +19,7 @@ use pnet_macros::types::*;
 use std::net::Ipv4Addr;
 
 #[packet]
-pub struct Ipv4<'a> {
+pub struct Ipv4 {
     version: u4,
     header_length: u4,
     dscp: u6,
@@ -29,25 +29,34 @@ pub struct Ipv4<'a> {
     flags: u3,
     fragment_offset: u13be,
     ttl: u8,
-    //protocol: u8,
     #[construct_with(u8)]
     next_level_protocol: IpNextHeaderProtocol,
-    //#[checksum(ipv4_checksum)]
     checksum: u16be,
     #[construct_with(u8, u8, u8, u8)]
     source: Ipv4Addr,
     #[construct_with(u8, u8, u8, u8)]
     destination: Ipv4Addr,
-    //source: u32be,
-    //destination: u32be,
     #[length_fn = "ipv4_options_length"]
-    options: &'a [Ipv4Option<'a>],
+    options: Vec<Ipv4Option>,
     #[payload]
-    payload: &'a [u8],
+    payload: Vec<u8>,
 }
 
-pub fn ipv4_checksum<'a>(ipv4: &Ipv4Packet<'a>) -> u16be {
-    unimplemented!();
+pub fn ipv4_checksum<'a>(packet: &Ipv4Packet<'a>) -> u16be {
+    use pnet::packet::Packet;
+
+    let len = packet.get_header_length() as usize * 4;
+    let mut sum = 0u32;
+    let mut i = 0;
+    while i < len {
+        let word = (packet.packet()[i] as u32) << 8 | packet.packet()[i + 1] as u32;
+        sum = sum + word;
+        i = i + 2;
+    }
+    while sum >> 16 != 0 {
+        sum = (sum >> 16) + (sum & 0xFFFF);
+    }
+    return !sum as u16;
 }
 
 pub fn ipv4_options_length<'a>(ipv4: &Ipv4Packet<'a>) -> usize {
@@ -55,13 +64,13 @@ pub fn ipv4_options_length<'a>(ipv4: &Ipv4Packet<'a>) -> usize {
 }
 
 #[packet]
-pub struct Ipv4Option<'a> {
+pub struct Ipv4Option {
     copied: u1,
     class: u2,
     number: u5,
     length: u8,
     #[payload]
-    data: &'a [u8]
+    data: Vec<u8>
 }
 
 #[test]

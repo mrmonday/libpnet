@@ -12,12 +12,12 @@
 extern crate pnet;
 
 #[packet]
-pub struct PacketWithPayload<'a> {
+pub struct PacketWithPayload {
     banana: u8,
     #[length_fn = "length_fn"]
-    var_length: &'a [u8],
+    var_length: Vec<u8>,
     #[payload]
-    payload: &'a [u8]
+    payload: Vec<u8>
 }
 
 fn length_fn(_: &PacketWithPayloadPacket) -> usize {
