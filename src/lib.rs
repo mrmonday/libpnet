@@ -102,13 +102,16 @@
 #![deny(missing_docs)]
 
 // FIXME Remove this once the std lib has stabilised
-#![feature(alloc, core, collections, old_io, libc, os, std_misc)]
+#![feature(alloc, core, collections, custom_attribute, old_io, libc, os, plugin, std_misc)]
+#![plugin(pnet_macros)]
 #![cfg_attr(feature = "netmap", feature(old_path))]
 
 extern crate libc;
+extern crate pnet_macros;
 
 pub mod datalink;
 pub mod old_packet;
+pub mod packet;
 pub mod transport;
 pub mod util;
 
@@ -119,4 +122,9 @@ mod internal;
 //      flags
 #[cfg(test)]
 mod test;
+
+// Required to make sure that imports from pnet_macros work
+mod pnet {
+    pub use packet;
+}
 

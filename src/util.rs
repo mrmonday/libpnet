@@ -10,6 +10,8 @@
 
 use bindings::libc;
 
+use packet::PrimitiveValues;
+
 use std::fmt;
 use std::str::FromStr;
 use std::mem;
@@ -19,9 +21,23 @@ use std::old_io::net::ip::IpAddr;
 #[cfg(not(windows))] use internal;
 
 /// A MAC address
-#[derive(PartialEq, Eq, Clone)]
+#[derive(PartialEq, Eq, Clone, Copy)]
 pub struct MacAddr(pub u8, pub u8, pub u8, pub u8, pub u8, pub u8);
-impl Copy for MacAddr {}
+
+impl MacAddr {
+    /// Construct a new MacAddr
+    pub fn new(a: u8, b: u8, c: u8, d: u8, e: u8, f: u8) -> MacAddr {
+        MacAddr(a, b, c, d, e, f)
+    }
+}
+
+impl PrimitiveValues for MacAddr {
+    type T = (u8, u8, u8, u8, u8, u8);
+    fn to_primitive_values(&self) -> (u8, u8, u8, u8, u8, u8) {
+        (self.0, self.1, self.2,
+         self.3, self.4, self.5)
+    }
+}
 
 impl fmt::Display for MacAddr {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {

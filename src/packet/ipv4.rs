@@ -1,4 +1,4 @@
-// Copyright (c) 2015 Robert Clipsham <robert@octarineparrot.com>
+// Copyright (c) 2014, 2015 Robert Clipsham <robert@octarineparrot.com>
 //
 // Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
 // http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
@@ -6,18 +6,15 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![feature(custom_attribute, plugin)]
-#![plugin(pnet_macros)]
+//! IPv4 packet abstraction
 
-extern crate pnet;
-extern crate pnet_macros;
-
-use pnet::packet::ip::IpNextHeaderProtocol;
+use packet::ip::IpNextHeaderProtocol;
 
 use pnet_macros::types::*;
 
 use std::net::Ipv4Addr;
 
+/// Represents an IPv4 Packet
 #[packet]
 pub struct Ipv4 {
     version: u4,
@@ -42,8 +39,9 @@ pub struct Ipv4 {
     payload: Vec<u8>,
 }
 
+/// Calculates the checksum of an IPv4 packet
 pub fn ipv4_checksum<'a>(packet: &Ipv4Packet<'a>) -> u16be {
-    use pnet::packet::Packet;
+    use packet::Packet;
 
     let len = packet.get_header_length() as usize * 4;
     let mut sum = 0u32;
@@ -59,10 +57,11 @@ pub fn ipv4_checksum<'a>(packet: &Ipv4Packet<'a>) -> u16be {
     return !sum as u16;
 }
 
-pub fn ipv4_options_length<'a>(ipv4: &Ipv4Packet<'a>) -> usize {
+fn ipv4_options_length<'a>(ipv4: &Ipv4Packet<'a>) -> usize {
     ipv4.get_header_length() as usize - 4
 }
 
+/// Represents the IPv4 Option field
 #[packet]
 pub struct Ipv4Option {
     copied: u1,
@@ -74,8 +73,8 @@ pub struct Ipv4Option {
 }
 
 #[test]
-fn ipv4_header_test() {
-    use pnet::packet::ip::IpNextHeaderProtocols;
+fn ipv4_packet_test() {
+    use packet::ip::IpNextHeaderProtocols;
 
     let mut packet = [0u8; 20];
     {
