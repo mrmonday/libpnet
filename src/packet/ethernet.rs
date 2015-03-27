@@ -33,7 +33,7 @@ pub struct Ethernet {
 fn ethernet_header_test() {
     let mut packet = [0u8; 14];
     {
-        let mut ethernet_header = MutableEthernetHeader::new(packet.as_mut_slice());
+        let mut ethernet_header = MutableEthernetPacket::new(packet.as_mut_slice());
 
         let source = MacAddr(0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc);
         ethernet_header.set_source(source);
@@ -62,7 +62,7 @@ fn ethernet_header_test() {
 #[allow(non_snake_case)]
 #[allow(non_upper_case_globals)]
 pub mod EtherTypes {
-    use old_packet::ethernet::EtherType;
+    use packet::ethernet::EtherType;
 
     pub const Ipv4: EtherType      = EtherType(0x0800);
     pub const Arp: EtherType       = EtherType(0x0806);

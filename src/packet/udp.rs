@@ -194,14 +194,14 @@ pub fn ipv6_checksum<'a>(packet: &UdpPacket<'a>,
 #[test]
 fn udp_header_ipv6_test() {
     use packet::ip::{IpNextHeaderProtocols};
-    use packet::ipv6::{MutableIpv6Header, Ipv6Packet};
+    use packet::ipv6::{MutableIpv6Packet, Ipv6Packet};
 
     let mut packet = [0u8; 40 + 8 + 4];
     let next_header = IpNextHeaderProtocols::Udp;
-    let ipv6_source = Ipv6Addr(0, 0, 0, 0, 0, 0, 0, 1);
-    let ipv6_destination = Ipv6Addr(0, 0, 0, 0, 0, 0, 0, 1);
+    let ipv6_source = Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1);
+    let ipv6_destination = Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1);
     {
-        let mut ip_header = MutableIpv6Header::new(packet.as_mut_slice());
+        let mut ip_header = MutableIpv6Packet::new(packet.as_mut_slice());
         ip_header.set_next_header(next_header);
         ip_header.set_source(ipv6_source);
         ip_header.set_destination(ipv6_destination);
@@ -214,7 +214,7 @@ fn udp_header_ipv6_test() {
     packet[40 + 8 + 3] = 't' as u8;
 
     {
-        let mut udp_header = MutableUdpHeader::new(&mut packet.as_mut_slice()[40..]);
+        let mut udp_header = MutableUdpPacket::new(&mut packet.as_mut_slice()[40..]);
         udp_header.set_source(12345);
         assert_eq!(udp_header.get_source(), 12345);
 
@@ -224,7 +224,11 @@ fn udp_header_ipv6_test() {
         udp_header.set_length(8 + 4);
         assert_eq!(udp_header.get_length(), 8 + 4);
 
-        udp_header.checksum(ipv6_source, ipv6_destination, next_header);
+        let checksum = ipv6_checksum(&udp_header.to_immutable(),
+                                     ipv6_source,
+                                     ipv6_destination,
+                                     next_header);
+        udp_header.set_checksum(checksum);
         assert_eq!(udp_header.get_checksum(), 0x1390);
     }
 

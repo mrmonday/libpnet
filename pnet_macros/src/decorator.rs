@@ -219,12 +219,14 @@ fn generate_mutator_str(name: &str,
 
     let mutator = if let Some(struct_name) = inner {
         format!("#[inline]
+    #[allow(trivial_numeric_casts)]
     fn set_{name}(self_: &mut {struct_name}, val: {ty}) {{
         {operations}
     }}", struct_name = struct_name, name = name, ty = ty, operations = op_strings)
     } else {
         format!("/// Set the {name} field
     #[inline]
+    #[allow(trivial_numeric_casts)]
     pub fn set_{name}(&mut self, val: {ty}) {{
         let self_ = self;
         {operations}
@@ -271,12 +273,14 @@ fn generate_accessor_str(name: &str,
 
     let accessor = if let Some(struct_name) = inner {
         format!("#[inline]
+        #[allow(trivial_numeric_casts)]
         fn get_{name}(self_: &{struct_name}) -> {ty} {{
             {operations}
         }}", struct_name = struct_name, name = name, ty = ty, operations = op_strings)
     } else {
         format!("/// Get the {name} field
         #[inline]
+        #[allow(trivial_numeric_casts)]
         pub fn get_{name}(&self) -> {ty} {{
             let self_ = self;
             {operations}
@@ -636,6 +640,7 @@ fn generate_header_impls(ecx: &mut ExtCtxt, span: &Span, name: &str, imm_name: &
                         accessors = accessors + &format!("
                                 /// Get the raw &[u8] value of the {name} field
                                 #[inline]
+                                #[allow(trivial_numeric_casts)]
                                 pub fn get_{name}_raw(&self) -> &[u8] {{
                                     let current_offset = {co};
                                     let len = {length_fn}(&self.to_immutable());
@@ -649,6 +654,7 @@ fn generate_header_impls(ecx: &mut ExtCtxt, span: &Span, name: &str, imm_name: &
                             accessors = accessors + &format!("
                                     /// Get the value of the {name} field
                                     #[inline]
+                                    #[allow(trivial_numeric_casts)]
                                     pub fn get_{name}(&self) -> Vec<{inner_ty_str}> {{
                                         use pnet::packet::FromPacket;
                                         let current_offset = {co};
@@ -667,6 +673,7 @@ fn generate_header_impls(ecx: &mut ExtCtxt, span: &Span, name: &str, imm_name: &
                             accessors = accessors + &format!("
                                     /// Get the value of the {name} field
                                     #[inline]
+                                    #[allow(trivial_numeric_casts)]
                                     pub fn get_{name}(&self) -> Vec<{inner_ty_str}> {{
                                         use pnet::packet::FromPacket;
                                         let current_offset = {co};
@@ -776,6 +783,7 @@ fn generate_header_impls(ecx: &mut ExtCtxt, span: &Span, name: &str, imm_name: &
                             mutators = mutators + &format!("
                             /// Set the value of the {name} field
                             #[inline]
+                            #[allow(trivial_numeric_casts)]
                             pub fn set_{name}(&mut self, val: {ty_str}) {{
                                 use pnet::packet::PrimitiveValues;
                                 {inner_mutators}
@@ -809,6 +817,7 @@ fn generate_header_impls(ecx: &mut ExtCtxt, span: &Span, name: &str, imm_name: &
                         accessors = accessors + &format!("
                             /// Get the value of the {name} field
                             #[inline]
+                            #[allow(trivial_numeric_casts)]
                             fn get_{name}(&self) -> {ty_str} {{
                                 {ctor}
                             }}

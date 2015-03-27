@@ -8,11 +8,6 @@
 
 //! Defines the type and constants for IP next header/next level protocol fields.
 
-// NOTE Everything here is pretending to be an enum, but with namespacing by default, so we allow
-//      breaking style guidelines.
-#[allow(non_snake_case)]
-#[allow(non_upper_case_globals)]
-
 use packet::PrimitiveValues;
 
 /// Protocol numbers as defined at:
@@ -20,6 +15,10 @@ use packet::PrimitiveValues;
 /// Above protocol numbers last updated: 2014-01-16
 /// These values should be used in either the IPv4 Next Level Protocol field
 /// or the IPv6 Next Header field.
+// NOTE Everything here is pretending to be an enum, but with namespacing by default, so we allow
+//      breaking style guidelines.
+#[allow(non_snake_case)]
+#[allow(non_upper_case_globals)]
 pub mod IpNextHeaderProtocols {
     use super::IpNextHeaderProtocol;
 
