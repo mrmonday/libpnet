@@ -38,6 +38,7 @@
 //! an interface, it echo's the packet back; reversing the source and destination addresses.
 //!
 //! ```rust,no_run
+//! #![feature(os)]
 //! extern crate pnet;
 //!
 //! use pnet::datalink::{datalink_channel};
@@ -104,6 +105,7 @@
 // FIXME Remove this once the std lib has stabilised
 #![feature(alloc, core, collections, custom_attribute, old_io, libc, os, plugin, std_misc)]
 #![plugin(pnet_macros)]
+#![cfg_attr(test, feature(str_char))]
 #![cfg_attr(feature = "netmap", feature(old_path))]
 
 extern crate libc;
