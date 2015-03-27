@@ -28,6 +28,8 @@ mod decorator;
 mod lint;
 mod util;
 
+pub mod types;
+
 /// Replace the #[packet] attribute with internal attributes
 ///
 /// The #[packet] attribute is consumed, so we replace it with two internal attributes,

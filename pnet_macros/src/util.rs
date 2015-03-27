@@ -95,9 +95,9 @@ impl fmt::Display for SetOperation {
         };
 
         if should_save {
-            write!(fmt, "{{packet}} = {} | ({})", save_str, shift_str)
+            write!(fmt, "{{packet}} = ({} | ({}) as u8) as u8", save_str, shift_str)
         } else {
-            write!(fmt, "{{packet}} = {}", shift_str)
+            write!(fmt, "{{packet}} = ({}) as u8", shift_str)
         }
     }
 }
@@ -106,11 +106,11 @@ impl fmt::Display for SetOperation {
 fn test_display_set_operation() {
     type Sop = SetOperation;
 
-    assert_eq!(Sop { save_mask: 0b00000011, value_mask: 0b00001111, shiftl: 2, shiftr: 0 }.to_string(), "{packet} = ({packet} & 0x3) | (({val} & 0xf) << 2)");
-    assert_eq!(Sop { save_mask: 0b11000000, value_mask: 0b00001111, shiftl: 2, shiftr: 2 }.to_string(), "{packet} = ({packet} & 0xc0) | (({val} & 0xf))");
-    assert_eq!(Sop { save_mask: 0b00011100, value_mask: 0b00001111, shiftl: 0, shiftr: 2 }.to_string(), "{packet} = ({packet} & 0x1c) | (({val} & 0xf) >> 2)");
-    assert_eq!(Sop { save_mask: 0b00000000, value_mask: 0b11111111, shiftl: 0, shiftr: 2 }.to_string(), "{packet} = {val} >> 2");
-    assert_eq!(Sop { save_mask: 0b00000011, value_mask: 0b11111111, shiftl: 3, shiftr: 1 }.to_string(), "{packet} = ({packet} & 0x3) | ({val} << 2)");
+    assert_eq!(Sop { save_mask: 0b00000011, value_mask: 0b00001111, shiftl: 2, shiftr: 0 }.to_string(), "{packet} = (({packet} & 0x3) | (({val} & 0xf) << 2) as u8) as u8");
+    assert_eq!(Sop { save_mask: 0b11000000, value_mask: 0b00001111, shiftl: 2, shiftr: 2 }.to_string(), "{packet} = (({packet} & 0xc0) | (({val} & 0xf)) as u8) as u8");
+    assert_eq!(Sop { save_mask: 0b00011100, value_mask: 0b00001111, shiftl: 0, shiftr: 2 }.to_string(), "{packet} = (({packet} & 0x1c) | (({val} & 0xf) >> 2) as u8");
+    assert_eq!(Sop { save_mask: 0b00000000, value_mask: 0b11111111, shiftl: 0, shiftr: 2 }.to_string(), "{packet} = ({val} >> 2) as u8");
+    assert_eq!(Sop { save_mask: 0b00000011, value_mask: 0b11111111, shiftl: 3, shiftr: 1 }.to_string(), "{packet} = (({packet} & 0x3) | ({val} << 2) as u8) as u8");
 }
 
 /// Gets a mask to get bits_remaining bits from offset bits into a byte
@@ -273,7 +273,7 @@ pub fn operations(offset: usize, size: usize) -> Option<Vec<GetOperation>> {
     let mut current_offset = offset;
     let mut num_bits_remaining = size;
     let mut ops = Vec::with_capacity(num_bytes);
-    for i in range(0, num_bytes) {
+    for i in 0..num_bytes {
         let (consumed, mask) = get_mask(current_offset, num_bits_remaining);
         ops.push(GetOperation {
             mask: mask,
@@ -346,7 +346,7 @@ fn mask_high_bits(mut bits: u64) -> u64 {
 pub fn to_mutator(ops: &[GetOperation]) -> Vec<SetOperation> {
     fn num_bits_set(n: u8) -> u64 {
         let mut count = 0;
-        for i in range(0, 8) {
+        for i in 0..8 {
             if n & (1 << i) > 0 {
                 count += 1;
             }

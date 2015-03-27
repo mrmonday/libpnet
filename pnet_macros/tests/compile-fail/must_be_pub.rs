@@ -12,14 +12,9 @@
 extern crate pnet;
 
 #[packet]
-pub struct PacketWithPayload<'a> {
+struct MustBePub<'a> { //~ ERROR #[packet] structs must be public
     banana: u8,
-    #[length_fn = "length_fn"]
-    var_length: &'a [u8],
     #[payload]
     payload: &'a [u8]
 }
 
-fn length_fn(_: &PacketWithPayloadPacket) -> usize {
-    unimplemented!()
-}

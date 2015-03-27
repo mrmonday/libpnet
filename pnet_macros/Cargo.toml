@@ -15,7 +15,7 @@ keywords = ["networking", "transport", "datalink", "packet", "protocol"]
 name = "pnet_macros"
 plugin = true
 
-[dependencies.pnet]
+[dev-dependencies.pnet]
 path = ".."
 version = "*"
 

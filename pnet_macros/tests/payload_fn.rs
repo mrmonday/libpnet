@@ -12,7 +12,7 @@
 extern crate pnet;
 
 #[packet]
-struct PacketWithPayload<'a> {
+pub struct PacketWithPayload<'a> {
     banana: u8,
     #[payload]
     payload: &'a [u8]
