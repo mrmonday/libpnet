@@ -40,7 +40,7 @@ pub struct Ipv4 {
 }
 
 /// Calculates the checksum of an IPv4 packet
-pub fn ipv4_checksum<'a>(packet: &Ipv4Packet<'a>) -> u16be {
+pub fn checksum<'a>(packet: &Ipv4Packet<'a>) -> u16be {
     use packet::Packet;
 
     let len = packet.get_header_length() as usize * 4;
@@ -115,7 +115,7 @@ fn ipv4_packet_test() {
         ip_header.set_destination(Ipv4Addr::new(192, 168, 0, 199));
         assert_eq!(ip_header.get_destination(), Ipv4Addr::new(192, 168, 0, 199));
 
-        let imm_header = ipv4_checksum(&ip_header.to_immutable());
+        let imm_header = checksum(&ip_header.to_immutable());
         ip_header.set_checksum(imm_header);
         assert_eq!(ip_header.get_checksum(), 0xb64e);
     }
@@ -130,6 +130,6 @@ fn ipv4_packet_test() {
                      0xb6, 0x4e,     /* checksum */
                      0xc0, 0xa8, 0x00, 0x01, /* source ip */
                      0xc0, 0xa8, 0x00, 0xc7  /* dest ip */];
-    assert_eq!(ref_packet.as_slice(), packet.as_slice());
+    assert_eq!(&ref_packet[..], &packet[..]);
 }
 

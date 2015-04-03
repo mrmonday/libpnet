@@ -28,7 +28,7 @@ pub trait MutablePacket : Packet {
     fn payload_mut<'p>(&'p mut self) -> &'p mut [u8];
 
     /// Initialize this packet by cloning another
-    fn clone_from<'p, T : Packet>(&'p mut self, other: T) {
+    fn clone_from<'p, T : Packet>(&'p mut self, other: &T) {
         use std::slice::bytes::copy_memory;
         copy_memory(other.packet(), self.packet_mut())
     }

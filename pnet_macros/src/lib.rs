@@ -18,7 +18,6 @@ use rustc::lint::{LintPassObject};
 use rustc::plugin::Registry;
 
 use syntax::ast;
-use syntax::attr;
 use syntax::codemap::{Span};
 use syntax::parse::token;
 use syntax::ext::base::{Decorator, ExtCtxt, Modifier};
@@ -44,6 +43,7 @@ pub fn packet_modifier(ecx: &mut ExtCtxt,
     new_item.attrs.push(quote_attr!(ecx, #[_packet_lint]));
     new_item.attrs.push(quote_attr!(ecx, #[_packet_generator]));
     new_item.attrs.push(quote_attr!(ecx, #[derive(Clone, Debug)]));
+    new_item.attrs.push(quote_attr!(ecx, #[allow(unused_attributes)]));
 
     P(new_item)
 }

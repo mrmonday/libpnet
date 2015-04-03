@@ -87,6 +87,6 @@ fn ipv6_header_test() {
                      0x10, 0x01,
                      0x01, 0x10,
                      0x10, 0x01];
-    assert_eq!(ref_packet.as_slice(), packet.as_slice());
+    assert_eq!(&ref_packet[..], &packet[..]);
 }
 

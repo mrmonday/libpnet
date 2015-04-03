@@ -118,14 +118,12 @@ pub fn generate_packet(ecx: &mut ExtCtxt,
             if let Some(imp) = generate_packet_impl(ecx, &mut_header[..], &payload_bounds, false) {
                 push(imp);
             } else {
-                println!("blargh");
                 return;
             }
             if let Some(imp) = generate_packet_impl(ecx, &mut_header[..], &payload_bounds, true) {
                 //push(ecx.parse_item("use pnet::packet::MutablePacket;".to_string()));
                 push(imp);
             } else {
-                println!("blargh");
                 return;
             }
 
@@ -136,6 +134,11 @@ pub fn generate_packet(ecx: &mut ExtCtxt,
             let converters = generate_converters(ecx, &name[..], &header[..], &mut_header[..], sd);
             //push(ecx.parse_item("use pnet::packet::FromPacket;".to_string()));
             for c in converters {
+                push(c);
+            }
+            let debug_impls = generate_debug_impls(ecx, &name[..], &header[..],
+                                                   &mut_header[..], sd);
+            for c in debug_impls {
                 push(c);
             }
         },
@@ -152,7 +155,7 @@ fn generate_header_struct(ecx: &mut ExtCtxt, name: &str, mut_: bool) -> P<ast::I
         ""
     };
 
-    ecx.parse_item(format!("//#[derive(Copy)] // FIXME?
+    ecx.parse_item(format!("#[derive(PartialEq)]
 /// A structure enabling manipulation of on the wire packets
 pub struct {}<'p> {{
     packet: &'p{} [u8],
@@ -397,6 +400,43 @@ fn generate_get_fields(sd: &ast::StructDef) -> String {
     gets
 }
 
+fn generate_debug_impls(ecx: &mut ExtCtxt, name: &str, imm_packet: &str, mut_packet: &str,
+                         sd: &ast::StructDef) -> Vec<P<ast::Item>> {
+    let mut items = Vec::new();
+
+    let mut field_fmt_str = String::new();
+    let mut get_fields = String::new();
+
+    let fields = &sd.fields;
+    for ref field in fields.iter() {
+        match field.node.ident() {
+            Some(name) => {
+                if !is_payload(field) && !is_iterable(field) {
+                    field_fmt_str = format!("{}{} : {{:?}}, ", field_fmt_str, name);
+                    get_fields = format!("{}, self.get_{}()", get_fields, name);
+                }
+            },
+            None => panic!(),
+        }
+    }
+
+    for packet in &[imm_packet, mut_packet] {
+        let item = ecx.parse_item(format!("
+        impl<'p> ::std::fmt::Debug for {packet}<'p> {{
+            fn fmt(&self, fmt: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {{
+                write!(fmt,
+                       \"{packet} {{{{ {field_fmt_str} }}}}\"
+                       {get_fields}
+                )
+            }}
+        }}", packet = packet, field_fmt_str = field_fmt_str, get_fields = get_fields));
+        items.push(item);
+    }
+
+    items
+}
+
+
 fn generate_converters(ecx: &mut ExtCtxt, name: &str, imm_packet: &str, mut_packet: &str,
                          sd: &ast::StructDef) -> Vec<P<ast::Item>> {
     let mut items = Vec::with_capacity(4);
@@ -485,7 +525,6 @@ fn generate_iterable(ecx: &mut ExtCtxt, name: &str) -> Vec<P<ast::Item>> {
         }}
     }}
     ", name = name));
-    println!("iterable: {}Iterable", name);
 
     vec![item1, item2]
 }
@@ -519,7 +558,6 @@ fn generate_header_impls(ecx: &mut ExtCtxt, span: &Span, name: &str, imm_name: &
     let mut found_payload = false;
     let mut payload_span = None;
     for (idx, ref field) in fields.iter().enumerate() {
-        //println!("field: {:?}", field);
 
         if let Some(field_name) = field.node.ident() {
             let mut co = current_offset(bit_offset, &offset_fns[..]);
@@ -629,14 +667,12 @@ fn generate_header_impls(ecx: &mut ExtCtxt, span: &Span, name: &str, imm_name: &
                             ecx.span_err(field.span, "variable length field must have #[length_fn = \"\"] attribute");
                             error = true;
                         }
-                        println!("name: {}", name);
                         //let ty_str = path.segments.iter().last().unwrap().identifier.as_str();
                         let inner_ty_str = if let ast::TyPath(_, ref inner_path) = ty.parameters.types().iter().nth(0).unwrap().node {
                             inner_path.segments.iter().nth(0).unwrap().identifier.as_str()
                         } else {
                             panic!()
                         };
-                        println!("field name: {}", field_name);
                         accessors = accessors + &format!("
                                 /// Get the raw &[u8] value of the {name} field
                                 #[inline]
@@ -818,7 +854,7 @@ fn generate_header_impls(ecx: &mut ExtCtxt, span: &Span, name: &str, imm_name: &
                             /// Get the value of the {name} field
                             #[inline]
                             #[allow(trivial_numeric_casts)]
-                            fn get_{name}(&self) -> {ty_str} {{
+                            pub fn get_{name}(&self) -> {ty_str} {{
                                 {ctor}
                             }}
                             ", name = field_name, ty_str = ty_str, ctor = ctor)[..];
@@ -857,9 +893,9 @@ fn generate_header_impls(ecx: &mut ExtCtxt, span: &Span, name: &str, imm_name: &
     let set_fields = "unimplemented!();/* TODO */";
 
     let populate = if mut_ {
-        format!("/// Populates a {name}Packet using a {name}
+        format!("/// Populates a {name}Packet using a {name} structure
          #[inline]
-         pub fn populate(str: {name}) {{
+         pub fn populate(_packet: {name}) {{
              {set_fields}
          }}", name = name, set_fields = set_fields)
     } else {

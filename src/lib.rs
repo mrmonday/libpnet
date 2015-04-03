@@ -1,4 +1,4 @@
-// Copyright (c) 2014 Robert Clipsham <robert@octarineparrot.com>
+// Copyright (c) 2014, 2015 Robert Clipsham <robert@octarineparrot.com>
 //
 // Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
 // http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
@@ -102,10 +102,11 @@
 #![crate_type = "dylib"]
 
 #![deny(missing_docs)]
+#![allow(plugin_as_library)]
 
 // FIXME Remove this once the std lib has stabilised
-#![feature(alloc, convert, core, collections, custom_attribute, old_io,
-           libc, os, plugin, slice_patterns, std_misc)]
+#![feature(convert, core, collections, custom_attribute, ip_addr, libc, io,
+           plugin, slice_patterns)]
 #![plugin(pnet_macros)]
 #![cfg_attr(test, feature(str_char))]
 #![cfg_attr(feature = "netmap", feature(old_path))]
@@ -114,7 +115,6 @@ extern crate libc;
 extern crate pnet_macros;
 
 pub mod datalink;
-pub mod old_packet;
 pub mod packet;
 pub mod transport;
 pub mod util;

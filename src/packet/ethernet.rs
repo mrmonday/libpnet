@@ -9,10 +9,6 @@
 //! Ethernet packet abstraction
 
 use packet::{Packet, PrimitiveValues};
-use packet::ip::IpNextHeaderProtocol;
-use packet::ipv4::Ipv4Packet;
-
-use pnet_macros::types::*;
 
 use util::MacAddr;
 
@@ -50,7 +46,7 @@ fn ethernet_header_test() {
     let ref_packet = [0xde, 0xf0, 0x12, 0x34, 0x45, 0x67, /* destination */
                       0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, /* source */
                       0x86, 0xdd /* ethertype */];
-    assert_eq!(ref_packet.as_slice(), packet.as_slice());
+    assert_eq!(&ref_packet[..], &packet[..]);
 }
 
 /// EtherTypes defined at:

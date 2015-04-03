@@ -10,7 +10,6 @@
 
 use packet::Packet;
 use packet::ip::IpNextHeaderProtocol;
-use packet::ipv4::Ipv4Packet;
 
 use pnet_macros::types::*;
 
@@ -124,7 +123,7 @@ fn udp_header_ipv4_test() {
                      0xd4, 0x31, /* destination */
                      0x00, 0x0c, /* length */
                      0x91, 0x78  /* checksum*/];
-    assert_eq!(ref_packet.as_slice(), &packet[20 .. 28]);
+    assert_eq!(&ref_packet[..], &packet[20 .. 28]);
 }
 
 
@@ -194,7 +193,7 @@ pub fn ipv6_checksum<'a>(packet: &UdpPacket<'a>,
 #[test]
 fn udp_header_ipv6_test() {
     use packet::ip::{IpNextHeaderProtocols};
-    use packet::ipv6::{MutableIpv6Packet, Ipv6Packet};
+    use packet::ipv6::{MutableIpv6Packet};
 
     let mut packet = [0u8; 40 + 8 + 4];
     let next_header = IpNextHeaderProtocols::Udp;
@@ -236,6 +235,6 @@ fn udp_header_ipv6_test() {
                      0xd4, 0x31, /* destination */
                      0x00, 0x0c, /* length */
                      0x13, 0x90  /* checksum*/];
-    assert_eq!(ref_packet.as_slice(), &packet[40 .. 48]);
+    assert_eq!(&ref_packet[..], &packet[40 .. 48]);
 }
 

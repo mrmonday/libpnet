@@ -1,4 +1,4 @@
-// Copyright (c) 2014 Robert Clipsham <robert@octarineparrot.com>
+// Copyright (c) 2014, 2015 Robert Clipsham <robert@octarineparrot.com>
 //
 // Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
 // http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
@@ -15,8 +15,8 @@ use packet::PrimitiveValues;
 use std::fmt;
 use std::str::FromStr;
 use std::mem;
-use std::num::from_str_radix;
-use std::old_io::net::ip::IpAddr;
+use std::u8;
+use std::net::IpAddr;
 
 #[cfg(not(windows))] use internal;
 
@@ -79,7 +79,7 @@ impl FromStr for MacAddr {
             if i == 6 {
                 return Err(ParseMacAddrErr::TooManyComponents);
             }
-            match from_str_radix(split, 16) {
+            match u8::from_str_radix(split, 16) {
                 Ok(b) if split.len() != 0 => parts[i] = b,
                 _ => return Err(ParseMacAddrErr::InvalidComponent),
             }
@@ -152,7 +152,7 @@ fn sockaddr_to_network_addr(sa: *const libc::sockaddr) -> (Option<MacAddr>, Opti
             let addr = internal::sockaddr_to_addr(mem::transmute(sa),
                                         mem::size_of::<libc::sockaddr_storage>());
             return match addr {
-                Ok(sa) => (None, Some(sa.ip)),
+                Ok(sa) => (None, Some(sa.ip())),
                 Err(_) => (None, None)
             };
         }
@@ -180,7 +180,7 @@ fn sockaddr_to_network_addr(sa: *const libc::sockaddr) -> (Option<MacAddr>, Opti
             let addr = internal::sockaddr_to_addr(mem::transmute(sa),
                                         mem::size_of::<libc::sockaddr_storage>());
             match addr {
-                Ok(sa) => (None, Some(sa.ip)),
+                Ok(sa) => (None, Some(sa.ip())),
                 Err(_) => (None, None)
             }
         }
