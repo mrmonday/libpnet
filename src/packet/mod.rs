@@ -78,18 +78,6 @@ impl PrimitiveValues for ::std::net::Ipv6Addr {
     }
 }
 
-///// Convert a value of type T to the appropriate wire format
-//pub trait ToWire {
-//    /// Convert a value to the appropriate wire format
-//    fn to_wire(&self, slice: &mut [u8]);
-//}
-
-///// Convert an on-the-wire value to it's Rust value
-//pub trait FromWire<T> {
-//    /// Convert an on-the-wire value to it's Rust value
-//    fn from_wire(slice: &[u8]) -> T;
-//}
-
 pub mod ethernet;
 pub mod ip;
 pub mod ipv4;
