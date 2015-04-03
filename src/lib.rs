@@ -103,7 +103,8 @@
 #![deny(missing_docs)]
 
 // FIXME Remove this once the std lib has stabilised
-#![feature(alloc, core, collections, custom_attribute, old_io, libc, os, plugin, std_misc)]
+#![feature(alloc, convert, core, collections, custom_attribute, old_io,
+           libc, os, plugin, slice_patterns, std_misc)]
 #![plugin(pnet_macros)]
 #![cfg_attr(test, feature(str_char))]
 #![cfg_attr(feature = "netmap", feature(old_path))]
