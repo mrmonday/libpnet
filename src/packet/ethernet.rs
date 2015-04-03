@@ -33,7 +33,7 @@ pub struct Ethernet {
 fn ethernet_header_test() {
     let mut packet = [0u8; 14];
     {
-        let mut ethernet_header = MutableEthernetPacket::new(packet.as_mut_slice());
+        let mut ethernet_header = MutableEthernetPacket::new(&mut packet[..]);
 
         let source = MacAddr(0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc);
         ethernet_header.set_source(source);

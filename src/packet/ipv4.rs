@@ -78,7 +78,7 @@ fn ipv4_packet_test() {
 
     let mut packet = [0u8; 20];
     {
-        let mut ip_header = MutableIpv4Packet::new(packet.as_mut_slice());
+        let mut ip_header = MutableIpv4Packet::new(&mut packet[..]);
         ip_header.set_version(4);
         assert_eq!(ip_header.get_version(), 4);
 
