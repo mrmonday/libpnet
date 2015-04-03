@@ -10,61 +10,14 @@
 
 use regex::Regex;
 
-use std::io;
-
 use syntax::ast;
-use syntax::codemap;
 use syntax::codemap::{Span};
-use syntax::diagnostic;
 use syntax::ext::base::{ExtCtxt};
 use syntax::ext::build::AstBuilder;
 use syntax::ext::quote::rt::{ExtParseUtils, ToSource};
-use syntax::parse;
 use syntax::ptr::P;
 
 use util::{Endianness, GetOperation, SetOperation, to_little_endian, operations, to_mutator};
-
-struct NullWriter;
-
-impl io::Write for NullWriter {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        println!("write got called!");
-        Ok(buf.len())
-    }
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
-
-struct NullEmitter;
-
-impl diagnostic::Emitter for NullEmitter {
-    fn emit(&mut self,
-            _cmsp: Option<(&codemap::CodeMap, Span)>,
-            _msg: &str,
-            _code: Option<&str>,
-            _lvl: diagnostic::Level) {
-    }
-    fn custom_emit(&mut self,
-                   _cm: &codemap::CodeMap,
-                   _sp: diagnostic::RenderSpan,
-                   _msg: &str,
-                   _lvl: diagnostic::Level) {
-    }
-}
-
-fn null_parse_item(ecx: &mut ExtCtxt, s: String) -> Option<P<ast::Item>> {
-    //let sh = diagnostic::mk_span_handler(diagnostic::mk_handler(true, Box::new(NullEmitter)),
-    let ew = diagnostic::EmitterWriter::new(Box::new(NullWriter), None);
-    let sh = diagnostic::mk_span_handler(diagnostic::mk_handler(true, Box::new(ew)),
-                                         codemap::CodeMap::new());
-    let sess = parse::new_parse_sess_special_handler(sh);
-
-    //println!("ecx cfg: {:?}", ecx.cfg());
-    //println!("ecx sess: {:?}", ecx.parse_sess());
-
-    parse::parse_item_from_source_str("<quote expansion>".to_string(), s, ecx.cfg(), &sess)
-}
 
 /// Lower and upper bounds of a payload
 /// Represented as strings since they may involve functions.
@@ -106,10 +59,7 @@ pub fn generate_packet(ecx: &mut ExtCtxt,
 
             let payload_bounds = payload_bounds.unwrap();
 
-            //push(ecx.parse_item("use pnet::packet::*;".to_string()));
-
             if let Some(imp) = generate_packet_impl(ecx, &header[..], &payload_bounds, false) {
-                //push(ecx.parse_item("use pnet::packet::Packet;".to_string()));
                 push(imp);
             } else {
                 ecx.span_err(span, &format!("length_fn must be of type &{} -> usize", &header[..])[..]);
@@ -121,7 +71,6 @@ pub fn generate_packet(ecx: &mut ExtCtxt,
                 return;
             }
             if let Some(imp) = generate_packet_impl(ecx, &mut_header[..], &payload_bounds, true) {
-                //push(ecx.parse_item("use pnet::packet::MutablePacket;".to_string()));
                 push(imp);
             } else {
                 return;
@@ -132,12 +81,10 @@ pub fn generate_packet(ecx: &mut ExtCtxt,
             }
 
             let converters = generate_converters(ecx, &name[..], &header[..], &mut_header[..], sd);
-            //push(ecx.parse_item("use pnet::packet::FromPacket;".to_string()));
             for c in converters {
                 push(c);
             }
-            let debug_impls = generate_debug_impls(ecx, &name[..], &header[..],
-                                                   &mut_header[..], sd);
+            let debug_impls = generate_debug_impls(ecx, &header[..], &mut_header[..], sd);
             for c in debug_impls {
                 push(c);
             }
@@ -314,7 +261,7 @@ fn generate_packet_impl(ecx: &mut ExtCtxt, name: &str, payload_bounds: &PayloadB
     };
     // FIXME Should .packet() return the entire buffer, or just the calculated size? what about
     //       checksums etc?
-    let item = null_parse_item(ecx, format!("impl<'a> ::pnet::packet::{mutable}Packet for {name}<'a> {{
+    let item = ecx.parse_item(format!("impl<'a> ::pnet::packet::{mutable}Packet for {name}<'a> {{
         #[inline]
         fn packet{u_mut}<'p>(&'p {mut_} self) -> &'p {mut_} [u8] {{ &{mut_} self.packet[..] }}
 
@@ -325,16 +272,11 @@ fn generate_packet_impl(ecx: &mut ExtCtxt, name: &str, payload_bounds: &PayloadB
         }}
     }}", name = name, start = start, end = end, pre = pre, mutable = mutable, u_mut = u_mut, mut_ = mut_));
 
-    item
+    Some(item)
 }
 
 fn current_offset(bit_offset: usize, offset_fns: &[String]) -> String {
     let base_offset = bit_offset / 8;
-    //let base_offset = if bit_offset == 0 {
-    //    0
-    //} else {
-    //    (bit_offset - 1) / 8
-    //};
 
     offset_fns.iter().fold(base_offset.to_string(), |a, b| {
         a + " + " + &b[..] + "(&self.to_immutable())"
@@ -400,7 +342,7 @@ fn generate_get_fields(sd: &ast::StructDef) -> String {
     gets
 }
 
-fn generate_debug_impls(ecx: &mut ExtCtxt, name: &str, imm_packet: &str, mut_packet: &str,
+fn generate_debug_impls(ecx: &mut ExtCtxt, imm_packet: &str, mut_packet: &str,
                          sd: &ast::StructDef) -> Vec<P<ast::Item>> {
     let mut items = Vec::new();
 
@@ -439,33 +381,9 @@ fn generate_debug_impls(ecx: &mut ExtCtxt, name: &str, imm_packet: &str, mut_pac
 
 fn generate_converters(ecx: &mut ExtCtxt, name: &str, imm_packet: &str, mut_packet: &str,
                          sd: &ast::StructDef) -> Vec<P<ast::Item>> {
-    let mut items = Vec::with_capacity(4);
+    let mut items = Vec::with_capacity(2);
 
-    //let packet_len = "1/* TODO */";
-    //let set_fields = "/* TODO */";
     let get_fields = generate_get_fields(sd);
-
-    //let item = ecx.parse_item(format!("impl<'p> ToMutablePacket<'p> for {name}<'p> {{
-    //    type T = {mut_packet}<'p>;
-    //    #[inline]
-    //    fn to_packet_mut(&self, buf: &'p mut [u8]) -> {mut_packet}<'p> {{
-    //        let mut packet = {mut_packet}::new(buf);
-
-    //        {set_fields}
-
-    //        packet
-    //    }}
-    //}}", name = name, mut_packet = mut_packet, set_fields = set_fields));
-    //items.push(item);
-
-    //let item = ecx.parse_item(format!("impl<'p> ToPacket<'p> for {name}<'p> {{
-    //    type T = {imm_packet}<'p>;
-    //    #[inline]
-    //    fn to_packet(&self, buf: &'p mut [u8]) -> {imm_packet}<'p> {{
-    //        self.to_packet_mut(buf).to_immutable()
-    //    }}
-    //}}", name = name, imm_packet = imm_packet));
-    //items.push(item);
 
     for packet in &[imm_packet, mut_packet] {
         let item = ecx.parse_item(format!("
@@ -711,7 +629,6 @@ fn generate_header_impls(ecx: &mut ExtCtxt, span: &Span, name: &str, imm_name: &
                                     #[inline]
                                     #[allow(trivial_numeric_casts)]
                                     pub fn get_{name}(&self) -> Vec<{inner_ty_str}> {{
-                                        use pnet::packet::FromPacket;
                                         let current_offset = {co};
                                         let len = {length_fn}(&self.to_immutable());
 
@@ -729,47 +646,9 @@ fn generate_header_impls(ecx: &mut ExtCtxt, span: &Span, name: &str, imm_name: &
                             ecx.span_err(field.span, "unimplemented variable length field");
                             error = true;
                         }
-                        //    else {
-                        //    accessors = accessors + &format!("
-                        //            #[inline]
-                        //            fn get_{name}(&self) -> {ty_str}Iterable {{
-                        //                let current_offset = {co};
-                        //                let len = {length_fn}(&self.to_immutable());
-
-                        //                {ty_str}Iterable {{
-                        //                    buf: &self.packet[current_offset..len]
-                        //                }}
-                        //            }}
-                        //            // FIXME Since this allocates, we probably want to deny &[Foo]
-                        //            //       and require FooIterable
-                        //            //#[inline]
-                        //            //fn get_{name}(&self) -> &[{ty_str}] {{
-                        //            //    use pnet::packet::FromPacket;
-
-                        //            //    let current_offset = {co};
-                        //            //    let len = {length_fn}(&self.to_immutable());
-
-                        //            //    {ty_str}Iterable {{
-                        //            //        buf: &self.packet[current_offset..len]
-                        //            //    }}.map( |packet| packet.from_packet() )
-                        //            //      .collect::<Vec<_>>()
-                        //            //      .as_slice()
-                        //            //}}
-                        //            ", name = field_name, ty_str = ty_str, co = co, length_fn = length_fn.as_ref().unwrap())[..];
-                        //}
-                        // TODO Generate getters/setters
-                        // if u**, get N*<type> fields - needs to be an Iterator to not allocate?
-                        // otherwise, assume #[packet], get N * type
                     } else if let Some((size, endianness)) = parse_ty(ty_str) {
-                        // FIXME Don't unwrap
-                        //println!("name: {}", field_name);
                         let mut ops = operations(bit_offset % 8, size).unwrap();
-                        //let f = format!("bit offset: {}; % 8: {}; size: {}", bit_offset, bit_offset % 8, size);
-                        //println!("{}", f);
-                        //for op in &ops {
-                        //    let f = format!("operation: {}", op);
-                        //    println!("{}", f);
-                        //}
+
                         if endianness == Endianness::Little {
                             ops = to_little_endian(ops);
                         }
@@ -779,12 +658,6 @@ fn generate_header_impls(ecx: &mut ExtCtxt, span: &Span, name: &str, imm_name: &
                         accessors = accessors + &generate_accessor_str(field_name.as_str(), ty_str, &co[..], &ops[..], None)[..];
                         bit_offset += size;
                     } else {
-                        // NOTE assumes this starts on a byte bountry
-                        // If ty_str is not a u*, then either:
-                        //  * The type is of fixed size, and is another packet type
-                        //  * The type is of variable length, and is an array of another packet type
-                        //println!("name: {}", field_name);
-                        let mut len = 0;
                         let mut inner_accessors = String::new();
                         let mut inner_mutators = String::new();
                         let mut get_args = String::new();
@@ -792,12 +665,7 @@ fn generate_header_impls(ecx: &mut ExtCtxt, span: &Span, name: &str, imm_name: &
                         for (i, arg) in construct_with.iter().enumerate() {
                             if let Some((size, endianness)) = parse_ty(arg) {
                                 let mut ops = operations(bit_offset % 8, size).unwrap();
-                                //let f = format!("bit offset: {}; % 8: {}; size: {}", bit_offset, bit_offset % 8, size);
-                                //println!("{}", f);
-                                //for op in &ops {
-                                //    let f = format!("operation: {}", op);
-                                //    println!("{}", f);
-                                //}
+
                                 if endianness == Endianness::Little {
                                     ops = to_little_endian(ops);
                                 }
@@ -809,7 +677,6 @@ fn generate_header_impls(ecx: &mut ExtCtxt, span: &Span, name: &str, imm_name: &
                                 bit_offset += size;
                                 // Current offset needs to be recalculated for each arg
                                 co = current_offset(bit_offset, &offset_fns[..]);
-                                len += size;
                             } else {
                                 ecx.span_err(field.span, "arguments to #[construct_with] must be primitives");
                                 error = true;
@@ -832,16 +699,6 @@ fn generate_header_impls(ecx: &mut ExtCtxt, span: &Span, name: &str, imm_name: &
                                ty_str = ty_str,
                                inner_mutators = inner_mutators,
                                set_args = set_args)[..];
-
-                            // FIXME Don't do this if ty_str's not a #[packet]
-                            //accessors = accessors + &format!("
-                            //    #[inline]
-                            //    fn get_{name}_mut(&mut self) -> Mutable{ty_str} {{
-                            //        let current_offset = {co};
-
-                            //        Mutable{ty_str}::new(&mut self.packet[current_offset..]);
-                            //    }}
-                            //    ", name = name, ty_str = ty_str, co = co)[..];
                         }
                         let ctor = if construct_with.len() > 0 {
                             format!("{} {}::new({})", inner_accessors, ty_str, &get_args[..get_args.len() - 2])
@@ -863,14 +720,6 @@ fn generate_header_impls(ecx: &mut ExtCtxt, span: &Span, name: &str, imm_name: &
                 ref banana => {
                     panic!("unhandled field type: {:?}, {:?}", field_name, banana);
                 }
-            }
-            if let ast::Ty_::TyPath(_, ref path) = field.node.ty.node {
-
-            } else {
-                println!("field type: {:?}", field.node.ty.node);
-                // FIXME Do this in lint
-                //ecx.span_err(field.span, "unsupported field type");
-                //error = true;
             }
             if has_length_fn {
                 offset_fns.push(length_fn.unwrap());

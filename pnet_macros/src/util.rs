@@ -9,7 +9,6 @@
 //! Utility functions for bit manipulation operations
 
 use std::fmt;
-use std::num::SignedInt;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Endianness {
@@ -440,6 +439,7 @@ fn test_to_mutator() {
 
 /// Takes a set of operations to get a field in big endian, and converts them to get the field in
 /// little endian.
-pub fn to_little_endian(ops: Vec<GetOperation>) -> Vec<GetOperation> {
+pub fn to_little_endian(_ops: Vec<GetOperation>) -> Vec<GetOperation> {
+    // FIXME
     unimplemented!()
 }
