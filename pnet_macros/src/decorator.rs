@@ -53,7 +53,10 @@ pub fn generate_packet(ecx: &mut ExtCtxt,
 
             let header_impls = generate_header_impls(ecx, &span, &mut_header[..], &header[..], sd, true, &mut payload_bounds);
             match header_impls {
-                Some((_, hi)) => push(hi),
+                Some((packet_len, hi)) => {
+                    push(hi);
+                    push(generate_packet_size(ecx, &mut_header[..], &packet_len[..]));
+                },
                 _ => return,
             }
 
@@ -151,14 +154,8 @@ fn test_parse_ty() {
     assert_eq!(parse_ty("i21be"), None);
 }
 
-/// Given the name of a field, and a set of operations required to set that field, return
-/// the Rust code required to set the field
-fn generate_mutator_str(name: &str,
-                        ty: &str,
-                        offset: &str,
-                        operations: &[SetOperation],
-                        inner: Option<&str>) -> String {
-    let mut op_strings = "".to_string();
+fn generate_sop_strings(offset: &str, operations: &[SetOperation]) -> String {
+    let mut op_strings = String::new();
     for (idx, sop) in operations.iter().enumerate() {
         let pkt_replace = format!("self_.packet[{} + {}]", offset, idx);
         let val_replace = "val";
@@ -166,6 +163,18 @@ fn generate_mutator_str(name: &str,
                                  .replace("{val}", val_replace);
         op_strings = op_strings + &sop[..] + ";\n";
     }
+
+    op_strings
+}
+
+/// Given the name of a field, and a set of operations required to set that field, return
+/// the Rust code required to set the field
+fn generate_mutator_str(name: &str,
+                        ty: &str,
+                        offset: &str,
+                        operations: &[SetOperation],
+                        inner: Option<&str>) -> String {
+    let op_strings = generate_sop_strings(offset, operations);
 
     let mutator = if let Some(struct_name) = inner {
         format!("#[inline]
@@ -592,7 +601,7 @@ fn generate_header_impls(ecx: &mut ExtCtxt, span: &Span, name: &str, imm_name: &
                             panic!()
                         };
                         accessors = accessors + &format!("
-                                /// Get the raw &[u8] value of the {name} field
+                                /// Get the raw &[u8] value of the {name} field, without copying
                                 #[inline]
                                 #[allow(trivial_numeric_casts)]
                                 pub fn get_{name}_raw(&self) -> &[u8] {{
@@ -604,9 +613,24 @@ fn generate_header_impls(ecx: &mut ExtCtxt, span: &Span, name: &str, imm_name: &
                                 ", name = field_name,
                                    co = co,
                                    length_fn = length_fn.as_ref().unwrap())[..];
+                        if mut_ {
+                            accessors = accessors + &format!("
+                                    /// Get the raw &mut [u8] value of the {name} field, without copying
+                                    #[inline]
+                                    #[allow(trivial_numeric_casts)]
+                                    pub fn get_{name}_raw_mut(&mut self) -> &mut [u8] {{
+                                        let current_offset = {co};
+                                        let len = {length_fn}(&self.to_immutable());
+
+                                        &mut self.packet[current_offset..len]
+                                    }}
+                                    ", name = field_name,
+                                       co = co,
+                                       length_fn = length_fn.as_ref().unwrap())[..];
+                        }
                         if let None = parse_ty(inner_ty_str) {
                             accessors = accessors + &format!("
-                                    /// Get the value of the {name} field
+                                    /// Get the value of the {name} field (copies contents)
                                     #[inline]
                                     #[allow(trivial_numeric_casts)]
                                     pub fn get_{name}(&self) -> Vec<{inner_ty_str}> {{
@@ -623,9 +647,30 @@ fn generate_header_impls(ecx: &mut ExtCtxt, span: &Span, name: &str, imm_name: &
                                        co = co,
                                        length_fn = length_fn.as_ref().unwrap(),
                                        inner_ty_str = inner_ty_str)[..];
+                            if mut_ {
+                                mutators = mutators + &format!("
+                                        /// Set the value of the {name} field (copies contents)
+                                        #[inline]
+                                        #[allow(trivial_numeric_casts)]
+                                        pub fn set_{name}(&mut self, vals: Vec<{inner_ty_str}>) {{
+                                            use pnet::packet::PacketSize;
+                                            let mut current_offset = {co};
+                                            let len = {length_fn}(&self.to_immutable());
+                                            for val in &vals {{
+                                                let mut packet = Mutable{inner_ty_str}Packet::new(&mut self.packet[current_offset..]);
+                                                packet.populate(val);
+                                                current_offset += packet.packet_size();
+                                                assert!(current_offset <= len);
+                                            }}
+                                        }}
+                                        ", name = field_name,
+                                           co = co,
+                                           length_fn = length_fn.as_ref().unwrap(),
+                                           inner_ty_str = inner_ty_str)[..];
+                                }
                         } else if inner_ty_str == "u8" {
                             accessors = accessors + &format!("
-                                    /// Get the value of the {name} field
+                                    /// Get the value of the {name} field (copies contents)
                                     #[inline]
                                     #[allow(trivial_numeric_casts)]
                                     pub fn get_{name}(&self) -> Vec<{inner_ty_str}> {{
@@ -642,6 +687,24 @@ fn generate_header_impls(ecx: &mut ExtCtxt, span: &Span, name: &str, imm_name: &
                                        co = co,
                                        length_fn = length_fn.as_ref().unwrap(),
                                        inner_ty_str = inner_ty_str)[..];
+                            if mut_ {
+                                mutators = mutators + &format!("
+                                        /// Set the value of the {name} field (copies contents)
+                                        #[inline]
+                                        #[allow(trivial_numeric_casts)]
+                                        pub fn set_{name}(&mut self, vals: Vec<{inner_ty_str}>) {{
+                                            use std::slice::bytes::copy_memory;
+                                            let current_offset = {co};
+                                            let len = {length_fn}(&self.to_immutable());
+                                            assert!(vals.len() <= len);
+
+                                            copy_memory(&vals[..], &mut self.packet[current_offset..]);
+                                        }}
+                                        ", name = field_name,
+                                           co = co,
+                                           length_fn = length_fn.as_ref().unwrap(),
+                                           inner_ty_str = inner_ty_str)[..];
+                            }
                         } else {
                             ecx.span_err(field.span, "unimplemented variable length field");
                             error = true;
@@ -739,14 +802,29 @@ fn generate_header_impls(ecx: &mut ExtCtxt, span: &Span, name: &str, imm_name: &
         return None;
     }
 
+    //fn generate_set_fields() {
+    //    let fields = &sd.fields;
+    //    for ref field in fields.iter() {
+    //        match field.node.ident() {
+    //            Some(name) => {
+    //                if !is_payload(field) && !is_iterable(field) {
+    //                    field_fmt_str = format!("{}{} : {{:?}}, ", field_fmt_str, name);
+    //                    get_fields = format!("{}, self.get_{}()", get_fields, name);
+    //                }
+    //            },
+    //            None => panic!(),
+    //        }
+    //    }
+    //}
+
     let set_fields = "unimplemented!();/* TODO */";
 
     let populate = if mut_ {
         format!("/// Populates a {name}Packet using a {name} structure
          #[inline]
-         pub fn populate(_packet: {name}) {{
+         pub fn populate(&mut self, _packet: &{name}) {{
              {set_fields}
-         }}", name = name, set_fields = set_fields)
+         }}", name = &imm_name[..imm_name.len() - 6], set_fields = set_fields)
     } else {
         "".to_string()
     };
