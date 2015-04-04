@@ -302,23 +302,6 @@ fn is_payload(field: &ast::StructField) -> bool {
     }).count() > 0
 }
 
-fn is_iterable(field: &ast::StructField) -> bool {
-    let ref ty = field.node.ty.node;
-
-    if let &ast::Ty_::TyRptr(_, ref ty) = ty {
-        if let ast::Ty_::TyVec(ref ty) = ty.ty.node {
-            if let ast::Ty_::TyPath(_, ref path) = ty.node {
-                let ty_str = path.segments.iter().last().unwrap().identifier.as_str();
-                if let None = parse_ty(ty_str) {
-                    return true;
-                }
-            }
-        }
-    }
-
-    false
-}
-
 fn generate_get_fields(sd: &ast::StructDef) -> String {
     let mut gets = String::new();
     let fields = &sd.fields;
@@ -333,13 +316,6 @@ fn generate_get_fields(sd: &ast::StructDef) -> String {
 
                                                 vec
                                             }},\n", field = name)[..]
-                } else if is_iterable(field) {
-                    gets = gets + &format!("{field} :
-                                               if let Some(val) = self.get_{field}().next() {{
-                                                   val.packet
-                                               }} else {{
-                                                   &[]
-                                               }},\n", field = name)[..]
                 } else {
                     gets = gets + &format!("{field} : self.get_{field}(),\n", field = name)[..]
                 }
@@ -362,7 +338,7 @@ fn generate_debug_impls(ecx: &mut ExtCtxt, imm_packet: &str, mut_packet: &str,
     for ref field in fields.iter() {
         match field.node.ident() {
             Some(name) => {
-                if !is_payload(field) && !is_iterable(field) {
+                if !is_payload(field) {
                     field_fmt_str = format!("{}{} : {{:?}}, ", field_fmt_str, name);
                     get_fields = format!("{}, self.get_{}()", get_fields, name);
                 }
@@ -802,27 +778,31 @@ fn generate_header_impls(ecx: &mut ExtCtxt, span: &Span, name: &str, imm_name: &
         return None;
     }
 
-    //fn generate_set_fields() {
-    //    let fields = &sd.fields;
-    //    for ref field in fields.iter() {
-    //        match field.node.ident() {
-    //            Some(name) => {
-    //                if !is_payload(field) && !is_iterable(field) {
-    //                    field_fmt_str = format!("{}{} : {{:?}}, ", field_fmt_str, name);
-    //                    get_fields = format!("{}, self.get_{}()", get_fields, name);
-    //                }
-    //            },
-    //            None => panic!(),
-    //        }
-    //    }
-    //}
+    fn generate_set_fields(sd: &ast::StructDef) -> String {
+        let fields = &sd.fields;
+        let mut set_fields = String::new();
+        for ref field in fields.iter() {
+            match field.node.ident() {
+                Some(name) => {
+                    if !is_payload(field) {
+                        set_fields = set_fields +
+                                     &format!("self.set_{field}(packet.{field}.clone());\n",
+                                              field = name)[..];
+                    }
+                },
+                None => panic!(),
+            }
+        }
 
-    let set_fields = "unimplemented!();/* TODO */";
+        set_fields
+    }
+
+    let set_fields = generate_set_fields(&sd);
 
     let populate = if mut_ {
         format!("/// Populates a {name}Packet using a {name} structure
          #[inline]
-         pub fn populate(&mut self, _packet: &{name}) {{
+         pub fn populate(&mut self, packet: &{name}) {{
              {set_fields}
          }}", name = &imm_name[..imm_name.len() - 6], set_fields = set_fields)
     } else {
