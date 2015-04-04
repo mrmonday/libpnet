@@ -16,7 +16,7 @@ pub enum Endianness {
     Little
 }
 
-#[derive(Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GetOperation {
     mask: u8,
     shiftl: u8,
@@ -55,7 +55,7 @@ fn test_display_get_operation() {
     assert_eq!(Op { mask: 0b11111111, shiftl: 3, shiftr: 1 }.to_string(), "{} << 2");
 }
 
-#[derive(Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SetOperation {
     /// Bits to save from old byte
     save_mask: u8,
