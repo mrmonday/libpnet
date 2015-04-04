@@ -6,6 +6,18 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+//! Provides type aliases for various primitive integer types
+//!
+//! These types are aliased to the next largest of [`u8`, `u16`, `u32`, `u64`], and purely serve as
+//! hints for the `#[packet]` macro to enable the generation of the correct bit manipulations to
+//! get the value out of a packet.
+//!
+//! They should NOT be used outside of data types marked as `#[packet]`.
+//!
+//! All aliases for types larger than `u8` contain a `be` or `le` suffix. These specify whether the
+//! value is big or little endian, respectively. When using `set_*()` and `get_*()` methods, host
+//! endianness should be used - the methods will convert as appropriate.
+
 #![allow(non_camel_case_types)]
 
 // TODO signed equivalents?
