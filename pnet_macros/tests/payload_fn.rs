@@ -6,7 +6,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![feature(collections, custom_attribute, plugin)]
+#![feature(core, collections, custom_attribute, plugin)]
 #![plugin(pnet_macros)]
 
 extern crate pnet;
