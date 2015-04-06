@@ -184,14 +184,10 @@ fn make_packets(ecx: &mut ExtCtxt, span: Span, item: &ast::Item) -> Option<Vec<P
 
 struct GenContext<'a, 'b : 'a, 'c> {
     ecx: &'a mut ExtCtxt<'b>,
-    span: Span,
     push: &'c mut FnMut(P<ast::Item>)
 }
 
 impl<'a, 'b, 'c> GenContext<'a, 'b, 'c> {
-    fn error(&self, err: &str) {
-        self.ecx.span_err(self.span, err);
-    }
     fn push_item_from_string(&mut self, item: String) {
         (*self.push)(self.ecx.parse_item(item));
     }
@@ -205,7 +201,6 @@ pub fn generate_packet(ecx: &mut ExtCtxt,
     if let Some(packets) = make_packets(ecx, span, item) {
         let mut cx = GenContext {
             ecx: ecx,
-            span: span,
             push: push
         };
 
@@ -310,7 +305,7 @@ fn generate_packet_impls(cx: &mut GenContext, packet: &Packet) -> Option<(Payloa
                                    length_fn = field.length_fn.as_ref().unwrap())[..];
                     }
                     match **inner_ty {
-                        Type::Primitive(ref inner_ty_str, ref size, ref endianness) => {
+                        Type::Primitive(ref inner_ty_str, _size, _endianness) => {
                             if inner_ty_str == "u8" {
                                 if !field.is_payload {
                                     accessors = accessors + &format!("
@@ -360,7 +355,7 @@ fn generate_packet_impls(cx: &mut GenContext, packet: &Packet) -> Option<(Payloa
                                 error = true;
                             }
                         },
-                        Type::Vector(ref inner_ty) => {
+                        Type::Vector(_) => {
                             cx.ecx.span_err(field.span, "variable length fields may not contain vectors");
                             error = true;
                         },
@@ -803,16 +798,6 @@ fn current_offset(bit_offset: usize, offset_fns: &[String]) -> String {
     })
 }
 
-fn is_payload(field: &ast::StructField) -> bool {
-    field.node.attrs.iter().filter(|&item| {
-        let ref node = item.node.value.node;
-        match node {
-            &ast::MetaWord(ref s) => &s[..] == "payload",
-            _ => false
-        }
-    }).count() > 0
-}
-
 fn generate_get_fields(packet: &Packet) -> String {
     let mut gets = String::new();
 
@@ -832,20 +817,3 @@ fn generate_get_fields(packet: &Packet) -> String {
 
     gets
 }
-
-fn stringify_path_segement(ps: &ast::PathSegment) -> String {
-    if ps.parameters.is_empty() {
-        ps.identifier.as_str().to_string()
-    } else {
-        let mut args = String::new();
-        for l in ps.parameters.lifetimes() {
-            args = format!("{}{}, ", args, l.name.as_str());
-        }
-        for t in ps.parameters.types() {
-            args = format!("{}{}, ", args, t.to_source());
-        }
-
-        format!("{ty}<{args}>", ty = ps.identifier.as_str(), args = &args[..args.len() - 2])
-    }
-}
-
