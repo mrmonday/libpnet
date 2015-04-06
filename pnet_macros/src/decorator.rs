@@ -26,90 +26,636 @@ struct PayloadBounds {
     upper: String,
 }
 
+#[derive(Clone, PartialEq)]
+enum Type {
+    /// Any of the u* types from pnet_macros::types::*
+    Primitive(String, usize, Endianness),
+    /// Any type of the form Vec<T>
+    Vector(Box<Type>),
+    /// Any type which isn't a primitive or a vector
+    Misc(String)
+}
+
+#[derive(Clone)]
+struct Field {
+    name: String,
+    span: Span,
+    ty: Type,
+    length_fn: Option<String>,
+    is_payload: bool,
+    construct_with: Option<Vec<Type>>
+}
+
+#[derive(Clone)]
+struct Packet {
+    base_name: String,
+    fields: Vec<Field>,
+}
+
+impl Packet {
+    fn packet_name_mut(&self) -> String {
+        format!("Mutable{}Packet", self.base_name)
+    }
+    fn packet_name(&self) -> String {
+        format!("{}Packet", self.base_name)
+    }
+}
+
+fn make_type(ty_str: String) -> Type {
+    if let Some((size, endianness)) = parse_ty(&ty_str[..]) {
+        Type::Primitive(ty_str, size, endianness)
+    } else if ty_str.starts_with("Vec<") {
+        let ty = make_type(String::from_str(&ty_str[4..ty_str.len()-1]));
+        Type::Vector(Box::new(ty))
+    } else {
+        Type::Misc(ty_str)
+    }
+}
+
+fn make_packets(ecx: &mut ExtCtxt, span: Span, item: &ast::Item) -> Option<Vec<Packet>> {
+    match item.node {
+        ast::ItemEnum(..) => unimplemented!(),
+        ast::ItemStruct(ref sd, ref _gs) => {
+            let name = item.ident.as_str().to_string();
+
+            let mut payload_span = None;
+            let mut fields = Vec::new();
+
+            for ref field in &sd.fields {
+                let field_name = match field.node.ident() {
+                    Some(name) => name.to_string(),
+                    None => {
+                        ecx.span_err(field.span, "all fields in a packet must be named");
+                        return None;
+                    }
+                };
+                let mut is_payload = false;
+                let mut length_fn = None;
+                let mut construct_with = Vec::new();
+                let mut seen = Vec::new();
+                for attr in field.node.attrs.iter() {
+                    let ref node = attr.node.value.node;
+                    match node {
+                        &ast::MetaWord(ref s) => {
+                            seen.push(s.to_string());
+                            if &s[..] == "payload" {
+                                if payload_span.is_some() {
+                                    ecx.span_err(field.span, "packet may not have multiple payloads");
+                                    ecx.span_note(payload_span.unwrap(), "first payload defined here");
+                                    return None;
+                                }
+                                is_payload = true;
+                                payload_span = Some(field.span);
+                            } else {
+                                ecx.span_err(field.span, &format!("unknown attribute: {}", s)[..]);
+                                return None;
+                            }
+                        },
+                        &ast::MetaList(ref s, ref items) => {
+                            seen.push(s.to_string());
+                            if &s[..] == "construct_with" {
+                                if items.iter().len() == 0 {
+                                    ecx.span_err(field.span, "#[construct_with] must have at least one argument");
+                                    return None;
+                                }
+                                for ty in items.iter() {
+                                    if let ast::MetaWord(ref s) = ty.node {
+                                        construct_with.push(make_type(s.to_string()));
+                                    } else {
+                                        ecx.span_err(field.span, "#[construct_with] should be of the form #[construct_with(<types>)]");
+                                        return None;
+                                    }
+                                }
+                            } else {
+                                ecx.span_err(field.span, &format!("unknown attribute: {}", s)[..]);
+                                return None;
+                            }
+                        },
+                        &ast::MetaNameValue(ref s, ref lit) => {
+                            seen.push(s.to_string());
+                            if &s[..] == "length_fn" {
+                                let ref node = lit.node;
+                                if let &ast::LitStr(ref s, _) = node {
+                                    length_fn = Some(s.to_string());
+                                } else {
+                                    ecx.span_err(field.span, "#[length_fn] should be used as #[length_fn = \"name_of_function\"]");
+                                    return None;
+                                }
+                            } else {
+                                ecx.span_err(field.span, &format!("unknown attribute: {}", s)[..]);
+                                return None;
+                            }
+                        }
+                    }
+                }
+                let old_len = seen.len();
+                seen.dedup();
+                if seen.len() != old_len {
+                    ecx.span_err(field.span, "cannot have two attributes with the same name");
+                }
+
+                fields.push(Field {
+                    name: field_name,
+                    span: field.span,
+                    ty: make_type(field.node.ty.to_source()),
+                    length_fn: length_fn,
+                    is_payload: is_payload,
+                    construct_with: Some(construct_with),
+                });
+            }
+
+            if payload_span.is_none() {
+                ecx.span_err(span, "#[packet]'s must contain a payload");
+                return None;
+            }
+
+            Some(vec![Packet {
+                base_name: name,
+                fields: fields,
+            }])
+        },
+        _ => {
+            ecx.span_err(span, "#[packet] may only be used with enums and structs");
+
+            None
+        }
+    }
+}
+
+struct GenContext<'a, 'b : 'a, 'c> {
+    ecx: &'a mut ExtCtxt<'b>,
+    span: Span,
+    push: &'c mut FnMut(P<ast::Item>)
+}
+
+impl<'a, 'b, 'c> GenContext<'a, 'b, 'c> {
+    fn error(&self, err: &str) {
+        self.ecx.span_err(self.span, err);
+    }
+    fn push_item_from_string(&mut self, item: String) {
+        (*self.push)(self.ecx.parse_item(item));
+    }
+}
+
 pub fn generate_packet(ecx: &mut ExtCtxt,
                    span: Span,
                    _meta_item: &ast::MetaItem,
                    item: &ast::Item,
                    mut push: &mut FnMut(P<ast::Item>)) {
-    match item.node {
-        ast::ItemEnum(..) => unimplemented!(),
-        ast::ItemStruct(ref sd, ref _gs) => {
-            let name = item.ident.as_str().to_string();
-            let header = format!("{}Packet", name);
-            let mut_header = format!("Mutable{}Packet", name);
-            push(generate_header_struct(ecx, &header[..], false));
-            push(generate_header_struct(ecx, &mut_header[..], true));
+    if let Some(packets) = make_packets(ecx, span, item) {
+        let mut cx = GenContext {
+            ecx: ecx,
+            span: span,
+            push: push
+        };
 
-            let mut payload_bounds = None;
+        for packet in &packets {
+            generate_packet_structs(&mut cx, &packet);
 
-            let header_impls = generate_header_impls(ecx, &span, &header[..], &header[..], sd, false, &mut payload_bounds);
-            match header_impls {
-                Some((packet_len, hi)) => {
-                    push(hi);
-                    push(generate_packet_size(ecx, &header[..], &packet_len[..]));
-                },
-                _ => return,
-            }
+            if let Some((payload_bounds, packet_size)) = generate_packet_impls(&mut cx, &packet) {
+                generate_packet_size_impls(&mut cx, &packet, &packet_size[..]);
 
-            let header_impls = generate_header_impls(ecx, &span, &mut_header[..], &header[..], sd, true, &mut payload_bounds);
-            match header_impls {
-                Some((packet_len, hi)) => {
-                    push(hi);
-                    push(generate_packet_size(ecx, &mut_header[..], &packet_len[..]));
-                },
-                _ => return,
+                generate_packet_trait_impls(&mut cx, &packet, &payload_bounds);
+                generate_iterables(&mut cx, &packet);
+                generate_converters(&mut cx, &packet);
+                generate_debug_impls(&mut cx, &packet);
             }
-
-            let payload_bounds = payload_bounds.unwrap();
-
-            if let Some(imp) = generate_packet_impl(ecx, &header[..], &payload_bounds, false) {
-                push(imp);
-            } else {
-                ecx.span_err(span, &format!("length_fn must be of type &{} -> usize", &header[..])[..]);
-                return;
-            }
-            if let Some(imp) = generate_packet_impl(ecx, &mut_header[..], &payload_bounds, false) {
-                push(imp);
-            } else {
-                return;
-            }
-            if let Some(imp) = generate_packet_impl(ecx, &mut_header[..], &payload_bounds, true) {
-                push(imp);
-            } else {
-                return;
-            }
-
-            for i in generate_iterable(ecx, &name[..]) {
-                push(i);
-            }
-
-            let converters = generate_converters(ecx, &name[..], &header[..], &mut_header[..], sd);
-            for c in converters {
-                push(c);
-            }
-            let debug_impls = generate_debug_impls(ecx, &header[..], &mut_header[..], sd);
-            for c in debug_impls {
-                push(c);
-            }
-        },
-        _ => {
-            ecx.span_err(span, "#[packet] may only be used with enums and structs");
         }
     }
 }
 
-fn generate_header_struct(ecx: &mut ExtCtxt, name: &str, mut_: bool) -> P<ast::Item> {
-    let mutable = if mut_ {
-        " mut"
-    } else {
-        ""
-    };
+fn generate_packet_structs(cx: &mut GenContext, packet: &Packet) {
+    for (name, mutable) in vec![(packet.packet_name(), ""),
+                             (packet.packet_name_mut(), " mut")] {
+        cx.push_item_from_string(format!("
+            #[derive(PartialEq)]
+            /// A structure enabling manipulation of on the wire packets
+            pub struct {}<'p> {{
+                packet: &'p{} [u8],
+            }}", name, mutable));
+    }
+}
 
-    ecx.parse_item(format!("#[derive(PartialEq)]
-/// A structure enabling manipulation of on the wire packets
-pub struct {}<'p> {{
-    packet: &'p{} [u8],
-}}", name, mutable))
+fn generate_packet_impls(cx: &mut GenContext, packet: &Packet) -> Option<(PayloadBounds, String)> {
+    let mut saved_bounds = None;
+    let mut saved_offset = String::new();
+    for (mutable, name) in vec![(false, packet.packet_name()),
+                                (true, packet.packet_name_mut())] {
+        let mut bit_offset = 0;
+        let mut offset_fns = Vec::new();
+        let mut accessors = "".to_string();
+        let mut mutators = "".to_string();
+        let mut error = false;
+        let mut payload_bounds = None;
+        for (idx, ref field) in packet.fields.iter().enumerate() {
+            let mut co = current_offset(bit_offset, &offset_fns[..]);
+
+            if field.is_payload {
+                let mut upper_bound_str = "".to_string();
+                if field.length_fn.is_some() {
+                    upper_bound_str = format!("{} + {}(&self.to_immutable())", co.clone(), field.length_fn.as_ref().unwrap());
+                } else {
+                    if idx != packet.fields.len() - 1 {
+                        cx.ecx.span_err(field.span, "#[payload] must specify a #[length_fn], unless it is the last field of a packet");
+                        error = true;
+                    }
+                }
+                payload_bounds = Some(PayloadBounds {
+                    lower: co.clone(),
+                    upper: upper_bound_str,
+                });
+            }
+            match field.ty {
+                Type::Primitive(ref ty_str, size, endianness) => {
+                    let mut ops = operations(bit_offset % 8, size).unwrap();
+
+                    if endianness == Endianness::Little {
+                        ops = to_little_endian(ops);
+                    }
+                    mutators = mutators + &generate_mutator_str(&field.name[..], &ty_str[..], &co[..], &to_mutator(&ops[..])[..], None)[..];
+                    accessors = accessors + &generate_accessor_str(&field.name[..], &ty_str[..], &co[..], &ops[..], None)[..];
+                    bit_offset += size;
+                },
+                Type::Vector(ref inner_ty) => {
+                    if !field.is_payload && !field.length_fn.is_some() {
+                        cx.ecx.span_err(field.span, "variable length field must have #[length_fn = \"\"] attribute");
+                        error = true;
+                    }
+                    if !field.is_payload {
+                        accessors = accessors + &format!("
+                                /// Get the raw &[u8] value of the {name} field, without copying
+                                #[inline]
+                                #[allow(trivial_numeric_casts)]
+                                pub fn get_{name}_raw(&self) -> &[u8] {{
+                                    let current_offset = {co};
+                                    let len = {length_fn}(&self.to_immutable());
+
+                                    &self.packet[current_offset..len]
+                                }}
+                                ", name = field.name,
+                                   co = co,
+                                   length_fn = field.length_fn.as_ref().unwrap());
+                        mutators = mutators + &format!("
+                                /// Get the raw &mut [u8] value of the {name} field, without copying
+                                #[inline]
+                                #[allow(trivial_numeric_casts)]
+                                pub fn get_{name}_raw_mut(&mut self) -> &mut [u8] {{
+                                    let current_offset = {co};
+                                    let len = {length_fn}(&self.to_immutable());
+
+                                    &mut self.packet[current_offset..len]
+                                }}
+                                ", name = field.name,
+                                   co = co,
+                                   length_fn = field.length_fn.as_ref().unwrap())[..];
+                    }
+                    match **inner_ty {
+                        Type::Primitive(ref inner_ty_str, ref size, ref endianness) => {
+                            if inner_ty_str == "u8" {
+                                if !field.is_payload {
+                                    accessors = accessors + &format!("
+                                            /// Get the value of the {name} field (copies contents)
+                                            #[inline]
+                                            #[allow(trivial_numeric_casts)]
+                                            pub fn get_{name}(&self) -> Vec<{inner_ty_str}> {{
+                                                let current_offset = {co};
+                                                let len = {length_fn}(&self.to_immutable());
+
+                                                let packet = &self.packet[current_offset..len];
+                                                let mut vec = Vec::with_capacity(packet.len());
+                                                vec.push_all(packet);
+
+                                                vec
+                                            }}
+                                            ", name = field.name,
+                                               co = co,
+                                               length_fn = field.length_fn.as_ref().unwrap(),
+                                               inner_ty_str = inner_ty_str)[..];
+                                }
+                                let check_len = if field.length_fn.is_some() {
+                                    format!("let len = {length_fn}(&self.to_immutable());
+                                             assert!(vals.len() <= len);",
+                                             length_fn = field.length_fn.as_ref().unwrap())
+                                } else {
+                                    String::new()
+                                };
+                                mutators = mutators + &format!("
+                                        /// Set the value of the {name} field (copies contents)
+                                        #[inline]
+                                        #[allow(trivial_numeric_casts)]
+                                        pub fn set_{name}(&mut self, vals: Vec<{inner_ty_str}>) {{
+                                            use std::slice::bytes::copy_memory;
+                                            let current_offset = {co};
+
+                                            {check_len}
+
+                                            copy_memory(&vals[..], &mut self.packet[current_offset..]);
+                                        }}
+                                        ", name = field.name,
+                                           co = co,
+                                           check_len = check_len,
+                                           inner_ty_str = inner_ty_str)[..];
+                            } else {
+                                cx.ecx.span_err(field.span, "unimplemented variable length field");
+                                error = true;
+                            }
+                        },
+                        Type::Vector(ref inner_ty) => {
+                            cx.ecx.span_err(field.span, "variable length fields may not contain vectors");
+                            error = true;
+                        },
+                        Type::Misc(ref inner_ty_str) => {
+                            accessors = accessors + &format!("
+                                    /// Get the value of the {name} field (copies contents)
+                                    #[inline]
+                                    #[allow(trivial_numeric_casts)]
+                                    pub fn get_{name}(&self) -> Vec<{inner_ty_str}> {{
+                                        use pnet::packet::FromPacket;
+                                        let current_offset = {co};
+                                        let len = {length_fn}(&self.to_immutable());
+
+                                        {inner_ty_str}Iterable {{
+                                            buf: &self.packet[current_offset..len]
+                                        }}.map(|packet| packet.from_packet())
+                                          .collect::<Vec<_>>()
+                                    }}
+                                    ", name = field.name,
+                                       co = co,
+                                       length_fn = field.length_fn.as_ref().unwrap(),
+                                       inner_ty_str = inner_ty_str)[..];
+                            mutators = mutators + &format!("
+                                    /// Set the value of the {name} field (copies contents)
+                                    #[inline]
+                                    #[allow(trivial_numeric_casts)]
+                                    pub fn set_{name}(&mut self, vals: Vec<{inner_ty_str}>) {{
+                                        use pnet::packet::PacketSize;
+                                        let mut current_offset = {co};
+                                        let len = {length_fn}(&self.to_immutable());
+                                        for val in vals.into_iter() {{
+                                            let mut packet = Mutable{inner_ty_str}Packet::new(&mut self.packet[current_offset..]);
+                                            packet.populate(val);
+                                            current_offset += packet.packet_size();
+                                            assert!(current_offset <= len);
+                                        }}
+                                    }}
+                                    ", name = field.name,
+                                       co = co,
+                                       length_fn = field.length_fn.as_ref().unwrap(),
+                                       inner_ty_str = inner_ty_str)[..];
+                        }
+                    }
+                },
+                Type::Misc(ref ty_str) => {
+                    let mut inner_accessors = String::new();
+                    let mut inner_mutators = String::new();
+                    let mut get_args = String::new();
+                    let mut set_args = String::new();
+                    let mut i = 0usize;
+                    for arg in field.construct_with.as_ref().unwrap().iter() {
+                        if let &Type::Primitive(ref ty_str, size, endianness) = arg {
+                            let mut ops = operations(bit_offset % 8, size).unwrap();
+
+                            if endianness == Endianness::Little {
+                                ops = to_little_endian(ops);
+                            }
+                            let arg_name = format!("arg{}", i);
+                            inner_accessors = inner_accessors + &generate_accessor_str(&arg_name[..], &ty_str[..], &co[..], &ops[..], Some(&name[..]))[..];
+                            inner_mutators = inner_mutators + &generate_mutator_str(&arg_name[..], &ty_str[..], &co[..], &to_mutator(&ops[..])[..], Some(&name[..]))[..];
+                            get_args = format!("{}get_{}(&self), ", get_args, arg_name);
+                            set_args = format!("{}set_{}(self, vals.{});\n", set_args, arg_name, i);
+                            bit_offset += size;
+                            // Current offset needs to be recalculated for each arg
+                            co = current_offset(bit_offset, &offset_fns[..]);
+                        } else {
+                            cx.ecx.span_err(field.span, "arguments to #[construct_with] must be primitives");
+                            error = true;
+                        }
+                        i += 1;
+                    }
+                    mutators = mutators + &format!("
+                    /// Set the value of the {name} field
+                    #[inline]
+                    #[allow(trivial_numeric_casts)]
+                    pub fn set_{name}(&mut self, val: {ty_str}) {{
+                        use pnet::packet::PrimitiveValues;
+                        {inner_mutators}
+
+                        let vals = val.to_primitive_values();
+
+                        {set_args}
+                    }}
+                    ", name = field.name,
+                       ty_str = ty_str,
+                       inner_mutators = inner_mutators,
+                       set_args = set_args)[..];
+                    let ctor = if field.construct_with.is_some() {
+                        format!("{} {}::new({})", inner_accessors, ty_str, &get_args[..get_args.len() - 2])
+                    } else {
+                        format!("let current_offset = {};
+
+                                {}::new(&self.packet[current_offset..])", co, ty_str)
+                    };
+                    accessors = accessors + &format!("
+                        /// Get the value of the {name} field
+                        #[inline]
+                        #[allow(trivial_numeric_casts)]
+                        pub fn get_{name}(&self) -> {ty_str} {{
+                            {ctor}
+                        }}
+                        ", name = field.name, ty_str = ty_str, ctor = ctor)[..];
+                }
+            }
+            if field.length_fn.is_some() {
+                offset_fns.push(field.length_fn.as_ref().unwrap().clone());
+            }
+        }
+
+        if error {
+            return None;
+        }
+
+        fn generate_set_fields(packet: &Packet) -> String {
+            let mut set_fields = String::new();
+            for field in packet.fields.iter() {
+                set_fields = set_fields + &format!("self.set_{field}(packet.{field});\n",
+                                                   field = field.name)[..];
+
+            }
+
+            set_fields
+        }
+
+        let populate = if mutable {
+            let set_fields = generate_set_fields(&packet);
+            let imm_name = packet.packet_name();
+            format!("/// Populates a {name}Packet using a {name} structure
+             #[inline]
+             pub fn populate(&mut self, packet: {name}) {{
+                 {set_fields}
+             }}", name = &imm_name[..imm_name.len() - 6], set_fields = set_fields)
+        } else {
+            "".to_string()
+        };
+
+        cx.push_item_from_string(format!("impl<'a> {name}<'a> {{
+        /// Constructs a new {name}
+        #[inline]
+        pub fn new<'p>(packet: &'p {mut} [u8]) -> {name}<'p> {{
+            // TODO This should ensure the provided buffer is at least a minimum size so we can avoid
+            //      bounds checking in accessors/mutators
+            {name} {{ packet: packet }}
+        }}
+
+        /// Maps from a {name} to a {imm_name}
+        #[inline]
+        pub fn to_immutable<'p>(&'p self) -> {imm_name}<'p> {{
+            match *self {{
+                {name} {{ ref packet }} => {imm_name} {{ packet: packet }}
+            }}
+        }}
+
+        {populate}
+
+        {accessors}
+
+        {mutators}
+    }}", name = name,
+         imm_name = packet.packet_name(),
+         mut = if mutable { "mut" } else { "" },
+         accessors = accessors,
+         mutators = if mutable { &mutators[..] } else { "" },
+         populate = populate
+         ));
+        saved_offset = current_offset(bit_offset, &offset_fns[..]);
+        saved_bounds = payload_bounds;
+     }
+
+    // We can unwrap here, since `struct Packet` must have a payload
+    Some((saved_bounds.unwrap(), saved_offset))
+}
+
+fn generate_packet_size_impls(cx: &mut GenContext, packet: &Packet, size: &str) {
+    for name in &[packet.packet_name(), packet.packet_name_mut()] {
+        cx.push_item_from_string(format!("
+            impl<'a> ::pnet::packet::PacketSize for {name}<'a> {{
+                fn packet_size(&self) -> usize {{
+                    {size}
+                }}
+            }}
+        ", name = name, size = size));
+    }
+}
+
+fn generate_packet_trait_impls(cx: &mut GenContext, packet: &Packet, payload_bounds: &PayloadBounds) {
+    for (name, mutable, u_mut, mut_) in vec![
+        (packet.packet_name_mut(), "Mutable", "_mut", "mut"),
+        (packet.packet_name_mut(), "", "", ""),
+        (packet.packet_name(), "", "", "")
+    ] {
+        let mut pre = "".to_string();
+        let mut start = "".to_string();
+        let mut end = "".to_string();
+        if payload_bounds.lower.len() > 0 {
+            pre = pre + &format!("let start = {};", payload_bounds.lower)[..];
+            start = "start".to_string();
+        }
+        if payload_bounds.upper.len() > 0 {
+            pre = pre + &format!("let end = {};", payload_bounds.upper)[..];
+            end = "end".to_string();
+        }
+        cx.push_item_from_string(format!("impl<'a> ::pnet::packet::{mutable}Packet for {name}<'a> {{
+            #[inline]
+            fn packet{u_mut}<'p>(&'p {mut_} self) -> &'p {mut_} [u8] {{ &{mut_} self.packet[..] }}
+
+            #[inline]
+            fn payload{u_mut}<'p>(&'p {mut_} self) -> &'p {mut_} [u8] {{
+                {pre}
+                &{mut_} self.packet[{start}..{end}]
+            }}
+        }}", name = name,
+             start = start,
+             end = end,
+             pre = pre,
+             mutable = mutable,
+             u_mut = u_mut,
+             mut_ = mut_));
+    }
+}
+
+fn generate_iterables(cx: &mut GenContext, packet: &Packet) {
+    let name = &packet.base_name;
+
+    cx.push_item_from_string(format!("
+    /// Used to iterate over a slice of `{name}Packet`s
+    pub struct {name}Iterable<'a> {{
+        buf: &'a [u8],
+    }}
+    ", name = name));
+
+    cx.push_item_from_string(format!("
+    impl<'a> Iterator for {name}Iterable<'a> {{
+        type Item = {name}Packet<'a>;
+
+        fn next(&mut self) -> Option<{name}Packet<'a>> {{
+            use pnet::packet::PacketSize;
+            if self.buf.len() > 0 {{
+                let ret = {name}Packet::new(self.buf);
+                self.buf = &self.buf[ret.packet_size()..];
+
+                return Some(ret);
+            }}
+
+            None
+        }}
+
+        fn size_hint(&self) -> (usize, Option<usize>) {{
+            (0, None)
+        }}
+    }}
+    ", name = name));
+}
+
+fn generate_converters(cx: &mut GenContext, packet: &Packet) {
+    let get_fields = generate_get_fields(packet);
+
+    for name in &[packet.packet_name(), packet.packet_name_mut()] {
+        cx.push_item_from_string(format!("
+        impl<'p> ::pnet::packet::FromPacket for {packet}<'p> {{
+            type T = {name};
+            #[inline]
+            fn from_packet(&self) -> {name} {{
+                use pnet::packet::Packet;
+                {name} {{
+                    {get_fields}
+                }}
+            }}
+        }}", packet = name, name = packet.base_name, get_fields = get_fields));
+    }
+}
+
+fn generate_debug_impls(cx: &mut GenContext, packet: &Packet) {
+
+    let mut field_fmt_str = String::new();
+    let mut get_fields = String::new();
+
+    for field in &packet.fields {
+        if !field.is_payload {
+            field_fmt_str = format!("{}{} : {{:?}}, ", field_fmt_str, field.name);
+            get_fields = format!("{}, self.get_{}()", get_fields, field.name);
+        }
+    }
+
+    for packet in &[packet.packet_name(), packet.packet_name_mut()] {
+        cx.push_item_from_string(format!("
+        impl<'p> ::std::fmt::Debug for {packet}<'p> {{
+            fn fmt(&self, fmt: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {{
+                write!(fmt,
+                       \"{packet} {{{{ {field_fmt_str} }}}}\"
+                       {get_fields}
+                )
+            }}
+        }}", packet = packet, field_fmt_str = field_fmt_str, get_fields = get_fields));
+    }
 }
 
 /// Given a type in the form `u([0-9]+)(be|le)?`, return a tuple of it's size and endianness
@@ -249,41 +795,6 @@ fn generate_accessor_str(name: &str,
     accessor
 }
 
-fn generate_packet_impl(ecx: &mut ExtCtxt, name: &str, payload_bounds: &PayloadBounds, mut_: bool)
-    -> Option<P<ast::Item>>
-{
-    let mut pre = "".to_string();
-    let mut start = "".to_string();
-    let mut end = "".to_string();
-    if payload_bounds.lower.len() > 0 {
-        pre = pre + &format!("let start = {};", payload_bounds.lower)[..];
-        start = "start".to_string();
-    }
-    if payload_bounds.upper.len() > 0 {
-        pre = pre + &format!("let end = {};", payload_bounds.upper)[..];
-        end = "end".to_string();
-    }
-    let (mutable, u_mut, mut_) = if mut_ {
-        ("Mutable", "_mut", "mut")
-    } else {
-        ("", "", "")
-    };
-    // FIXME Should .packet() return the entire buffer, or just the calculated size? what about
-    //       checksums etc?
-    let item = ecx.parse_item(format!("impl<'a> ::pnet::packet::{mutable}Packet for {name}<'a> {{
-        #[inline]
-        fn packet{u_mut}<'p>(&'p {mut_} self) -> &'p {mut_} [u8] {{ &{mut_} self.packet[..] }}
-
-        #[inline]
-        fn payload{u_mut}<'p>(&'p {mut_} self) -> &'p {mut_} [u8] {{
-            {pre}
-            &{mut_} self.packet[{start}..{end}]
-        }}
-    }}", name = name, start = start, end = end, pre = pre, mutable = mutable, u_mut = u_mut, mut_ = mut_));
-
-    Some(item)
-}
-
 fn current_offset(bit_offset: usize, offset_fns: &[String]) -> String {
     let base_offset = bit_offset / 8;
 
@@ -302,134 +813,24 @@ fn is_payload(field: &ast::StructField) -> bool {
     }).count() > 0
 }
 
-fn generate_get_fields(sd: &ast::StructDef) -> String {
+fn generate_get_fields(packet: &Packet) -> String {
     let mut gets = String::new();
-    let fields = &sd.fields;
-    for ref field in fields.iter() {
-        match field.node.ident() {
-            Some(name) => {
-                if is_payload(field) {
-                    gets = gets + &format!("{field} : {{
+
+    for field in &packet.fields {
+        if field.is_payload {
+            gets = gets + &format!("{field} : {{
                                                 let payload = self.payload();
                                                 let mut vec = Vec::with_capacity(payload.len());
                                                 vec.push_all(payload);
 
                                                 vec
-                                            }},\n", field = name)[..]
-                } else {
-                    gets = gets + &format!("{field} : self.get_{field}(),\n", field = name)[..]
-                }
-            },
-            None => panic!(),
+                                            }},\n", field = field.name)[..]
+        } else {
+            gets = gets + &format!("{field} : self.get_{field}(),\n", field = field.name)[..]
         }
     }
 
     gets
-}
-
-fn generate_debug_impls(ecx: &mut ExtCtxt, imm_packet: &str, mut_packet: &str,
-                         sd: &ast::StructDef) -> Vec<P<ast::Item>> {
-    let mut items = Vec::new();
-
-    let mut field_fmt_str = String::new();
-    let mut get_fields = String::new();
-
-    let fields = &sd.fields;
-    for ref field in fields.iter() {
-        match field.node.ident() {
-            Some(name) => {
-                if !is_payload(field) {
-                    field_fmt_str = format!("{}{} : {{:?}}, ", field_fmt_str, name);
-                    get_fields = format!("{}, self.get_{}()", get_fields, name);
-                }
-            },
-            None => panic!(),
-        }
-    }
-
-    for packet in &[imm_packet, mut_packet] {
-        let item = ecx.parse_item(format!("
-        impl<'p> ::std::fmt::Debug for {packet}<'p> {{
-            fn fmt(&self, fmt: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {{
-                write!(fmt,
-                       \"{packet} {{{{ {field_fmt_str} }}}}\"
-                       {get_fields}
-                )
-            }}
-        }}", packet = packet, field_fmt_str = field_fmt_str, get_fields = get_fields));
-        items.push(item);
-    }
-
-    items
-}
-
-
-fn generate_converters(ecx: &mut ExtCtxt, name: &str, imm_packet: &str, mut_packet: &str,
-                         sd: &ast::StructDef) -> Vec<P<ast::Item>> {
-    let mut items = Vec::with_capacity(2);
-
-    let get_fields = generate_get_fields(sd);
-
-    for packet in &[imm_packet, mut_packet] {
-        let item = ecx.parse_item(format!("
-        impl<'p> ::pnet::packet::FromPacket for {packet}<'p> {{
-            type T = {name};
-            #[inline]
-            fn from_packet(&self) -> {name} {{
-                use pnet::packet::Packet;
-                {name} {{
-                    {get_fields}
-                }}
-            }}
-        }}", packet = packet, name = name, get_fields = get_fields));
-        items.push(item);
-    }
-
-    items
-}
-
-fn generate_packet_size(ecx: &mut ExtCtxt, name: &str, size: &str) -> P<ast::Item> {
-    let item = ecx.parse_item(format!("
-        impl<'a> ::pnet::packet::PacketSize for {name}<'a> {{
-            fn packet_size(&self) -> usize {{
-                {size}
-            }}
-        }}
-    ", name = name, size = size));
-
-    item
-}
-
-fn generate_iterable(ecx: &mut ExtCtxt, name: &str) -> Vec<P<ast::Item>> {
-    let item1 = ecx.parse_item(format!("
-    /// Used to iterate over a slice of `{name}Packet`s
-    pub struct {name}Iterable<'a> {{
-        buf: &'a [u8],
-    }}
-    ", name = name));
-    let item2 = ecx.parse_item(format!("
-    impl<'a> Iterator for {name}Iterable<'a> {{
-        type Item = {name}Packet<'a>;
-
-        fn next(&mut self) -> Option<{name}Packet<'a>> {{
-            use pnet::packet::PacketSize;
-            if self.buf.len() > 0 {{
-                let ret = {name}Packet::new(self.buf);
-                self.buf = &self.buf[ret.packet_size()..];
-
-                return Some(ret);
-            }}
-
-            None
-        }}
-
-        fn size_hint(&self) -> (usize, Option<usize>) {{
-            (0, None)
-        }}
-    }}
-    ", name = name));
-
-    vec![item1, item2]
 }
 
 fn stringify_path_segement(ps: &ast::PathSegment) -> String {
@@ -446,406 +847,5 @@ fn stringify_path_segement(ps: &ast::PathSegment) -> String {
 
         format!("{ty}<{args}>", ty = ps.identifier.as_str(), args = &args[..args.len() - 2])
     }
-}
-
-fn generate_header_impls(ecx: &mut ExtCtxt, span: &Span, name: &str, imm_name: &str,
-                         sd: &ast::StructDef, mut_: bool, payload_fn: &mut Option<PayloadBounds>)
-    -> Option<(String, P<ast::Item>)>
-{
-    let mut bit_offset = 0;
-    let mut offset_fns = Vec::new();
-    let ref fields = sd.fields;
-    let mut accessors = "".to_string();
-    let mut mutators = "".to_string();
-    let mut error = false;
-    let mut found_payload = false;
-    let mut payload_span = None;
-    for (idx, ref field) in fields.iter().enumerate() {
-
-        if let Some(field_name) = field.node.ident() {
-            let mut co = current_offset(bit_offset, &offset_fns[..]);
-
-            // FIXME No need for has_length_fn
-            let (has_length_fn, length_fn) = field.node.attrs.iter()
-                                                  .fold((false, None), |(has, name), b| {
-                if !has {
-                    let ref node = b.node.value.node;
-                    match node {
-                        &ast::MetaNameValue(ref s, ref lit) => if &s[..] == "length_fn" {
-                            let ref node = lit.node;
-                            match node {
-                                &ast::LitStr(ref s, _) => {
-                                    // FIXME Do we need to check the style (snd lit.node)?
-                                    (true, Some(s.to_string()))
-                                },
-                                _ => {
-                                    ecx.span_err(field.span, "#[length_fn] should be used as #[length_fn = \"name_of_function\"]");
-                                    error = true;
-                                    (has, name)
-                                }
-                            }
-                        } else {
-                            (has, name)
-                        },
-                        _ => (has, name)
-                    }
-                } else {
-                    (has, name)
-                }
-            });
-
-            let construct_with = field.node.attrs.iter().fold(Vec::new(), |mut tys, item| {
-                let ref node = item.node.value.node;
-                match node {
-                    &ast::MetaList(ref s, ref items) => {
-                        if &s[..] == "construct_with" {
-                            for ty in items.iter() {
-                                if let ast::MetaWord(ref s) = ty.node {
-                                    tys.push(s.to_string());
-                                } else {
-                                    ecx.span_err(field.span, "#[construct_with] should be of the form #[construct_with(<types>)]");
-                                    error = true;
-                                    break;
-                                }
-                            }
-                        }
-                    },
-                    &ast::MetaWord(ref s) | &ast::MetaNameValue(ref s, _) => {
-                        if &s[..] == "construct_with" {
-                            ecx.span_err(field.span, "#[construct_with] should be of the form #[construct_with(<types>)]");
-                            error = true;
-                        }
-                    },
-                }
-
-                tys
-            });
-
-            let is_payload = field.node.attrs.iter().filter(|&item| {
-                let ref node = item.node.value.node;
-                match node {
-                    &ast::MetaWord(ref s) => &s[..] == "payload",
-                    &ast::MetaList(ref s, _) |
-                    &ast::MetaNameValue(ref s, _) => {
-                        if &s[..] == "payload" {
-                            ecx.span_err(field.span, "#[payload] attribute has no arguments");
-                            error = true;
-                        }
-
-                        false
-                    },
-                }
-            }).count() > 0;
-            if is_payload {
-                if found_payload {
-                    ecx.span_err(field.span, "packet may not have multiple payloads");
-                    ecx.span_note(payload_span.unwrap(), "first payload defined here");
-                    return None;
-                }
-                found_payload = true;
-                payload_span = Some(field.span);
-                let mut upper_bound_str = "".to_string();
-                if has_length_fn {
-                    upper_bound_str = format!("{} + {}(&self.to_immutable())", co.clone(), length_fn.as_ref().unwrap());
-                } else {
-                    if idx != fields.len() - 1 {
-                        ecx.span_err(field.span, "#[payload] must specify a #[length_fn], unless it is the last field of a packet");
-                        error = true;
-                    }
-                }
-                *payload_fn = Some(PayloadBounds {
-                    lower: co.clone(),
-                    upper: upper_bound_str,
-                });
-            }
-            match field.node.ty.node {
-                ast::Ty_::TyPath(_, ref path) => {
-                    let ty = path.segments.iter().last().unwrap();
-                    let ty_str = &stringify_path_segement(&ty)[..];
-                    if ty_str.starts_with("Vec<") {
-                        if !is_payload && !has_length_fn {
-                            ecx.span_err(field.span, "variable length field must have #[length_fn = \"\"] attribute");
-                            error = true;
-                        }
-                        //let ty_str = path.segments.iter().last().unwrap().identifier.as_str();
-                        let inner_ty_str = if let ast::TyPath(_, ref inner_path) = ty.parameters.types().iter().nth(0).unwrap().node {
-                            inner_path.segments.iter().nth(0).unwrap().identifier.as_str()
-                        } else {
-                            panic!()
-                        };
-                        if !is_payload {
-                            accessors = accessors + &format!("
-                                    /// Get the raw &[u8] value of the {name} field, without copying
-                                    #[inline]
-                                    #[allow(trivial_numeric_casts)]
-                                    pub fn get_{name}_raw(&self) -> &[u8] {{
-                                        let current_offset = {co};
-                                        let len = {length_fn}(&self.to_immutable());
-
-                                        &self.packet[current_offset..len]
-                                    }}
-                                    ", name = field_name,
-                                       co = co,
-                                       length_fn = length_fn.as_ref().unwrap())[..];
-                            if mut_ {
-                                accessors = accessors + &format!("
-                                        /// Get the raw &mut [u8] value of the {name} field, without copying
-                                        #[inline]
-                                        #[allow(trivial_numeric_casts)]
-                                        pub fn get_{name}_raw_mut(&mut self) -> &mut [u8] {{
-                                            let current_offset = {co};
-                                            let len = {length_fn}(&self.to_immutable());
-
-                                            &mut self.packet[current_offset..len]
-                                        }}
-                                        ", name = field_name,
-                                           co = co,
-                                           length_fn = length_fn.as_ref().unwrap())[..];
-                            }
-                        }
-                        if let None = parse_ty(inner_ty_str) {
-                            accessors = accessors + &format!("
-                                    /// Get the value of the {name} field (copies contents)
-                                    #[inline]
-                                    #[allow(trivial_numeric_casts)]
-                                    pub fn get_{name}(&self) -> Vec<{inner_ty_str}> {{
-                                        use pnet::packet::FromPacket;
-                                        let current_offset = {co};
-                                        let len = {length_fn}(&self.to_immutable());
-
-                                        {inner_ty_str}Iterable {{
-                                            buf: &self.packet[current_offset..len]
-                                        }}.map(|packet| packet.from_packet())
-                                          .collect::<Vec<_>>()
-                                    }}
-                                    ", name = field_name,
-                                       co = co,
-                                       length_fn = length_fn.as_ref().unwrap(),
-                                       inner_ty_str = inner_ty_str)[..];
-                            if mut_ {
-                                mutators = mutators + &format!("
-                                        /// Set the value of the {name} field (copies contents)
-                                        #[inline]
-                                        #[allow(trivial_numeric_casts)]
-                                        pub fn set_{name}(&mut self, vals: Vec<{inner_ty_str}>) {{
-                                            use pnet::packet::PacketSize;
-                                            let mut current_offset = {co};
-                                            let len = {length_fn}(&self.to_immutable());
-                                            for val in vals.into_iter() {{
-                                                let mut packet = Mutable{inner_ty_str}Packet::new(&mut self.packet[current_offset..]);
-                                                packet.populate(val);
-                                                current_offset += packet.packet_size();
-                                                assert!(current_offset <= len);
-                                            }}
-                                        }}
-                                        ", name = field_name,
-                                           co = co,
-                                           length_fn = length_fn.as_ref().unwrap(),
-                                           inner_ty_str = inner_ty_str)[..];
-                                }
-                        } else if inner_ty_str == "u8" {
-                            if !is_payload {
-                                accessors = accessors + &format!("
-                                        /// Get the value of the {name} field (copies contents)
-                                        #[inline]
-                                        #[allow(trivial_numeric_casts)]
-                                        pub fn get_{name}(&self) -> Vec<{inner_ty_str}> {{
-                                            let current_offset = {co};
-                                            let len = {length_fn}(&self.to_immutable());
-
-                                            let packet = &self.packet[current_offset..len];
-                                            let mut vec = Vec::with_capacity(packet.len());
-                                            vec.push_all(packet);
-
-                                            vec
-                                        }}
-                                        ", name = field_name,
-                                           co = co,
-                                           length_fn = length_fn.as_ref().unwrap(),
-                                           inner_ty_str = inner_ty_str)[..];
-                            }
-                            if mut_ {
-                                let check_len = if has_length_fn {
-                                    format!("let len = {length_fn}(&self.to_immutable());
-                                             assert!(vals.len() <= len);",
-                                             length_fn = length_fn.as_ref().unwrap())
-                                } else {
-                                    String::new()
-                                };
-                                mutators = mutators + &format!("
-                                        /// Set the value of the {name} field (copies contents)
-                                        #[inline]
-                                        #[allow(trivial_numeric_casts)]
-                                        pub fn set_{name}(&mut self, vals: Vec<{inner_ty_str}>) {{
-                                            use std::slice::bytes::copy_memory;
-                                            let current_offset = {co};
-
-                                            {check_len}
-
-                                            copy_memory(&vals[..], &mut self.packet[current_offset..]);
-                                        }}
-                                        ", name = field_name,
-                                           co = co,
-                                           check_len = check_len,
-                                           inner_ty_str = inner_ty_str)[..];
-                            }
-                        } else {
-                            ecx.span_err(field.span, "unimplemented variable length field");
-                            error = true;
-                        }
-                    } else if let Some((size, endianness)) = parse_ty(ty_str) {
-                        let mut ops = operations(bit_offset % 8, size).unwrap();
-
-                        if endianness == Endianness::Little {
-                            ops = to_little_endian(ops);
-                        }
-                        if mut_ {
-                            mutators = mutators + &generate_mutator_str(field_name.as_str(), ty_str, &co[..], &to_mutator(&ops[..])[..], None)[..];
-                        }
-                        accessors = accessors + &generate_accessor_str(field_name.as_str(), ty_str, &co[..], &ops[..], None)[..];
-                        bit_offset += size;
-                    } else {
-                        let mut inner_accessors = String::new();
-                        let mut inner_mutators = String::new();
-                        let mut get_args = String::new();
-                        let mut set_args = String::new();
-                        for (i, arg) in construct_with.iter().enumerate() {
-                            if let Some((size, endianness)) = parse_ty(arg) {
-                                let mut ops = operations(bit_offset % 8, size).unwrap();
-
-                                if endianness == Endianness::Little {
-                                    ops = to_little_endian(ops);
-                                }
-                                let arg_name = format!("arg{}", i);
-                                inner_accessors = inner_accessors + &generate_accessor_str(&arg_name[..], arg, &co[..], &ops[..], Some(name))[..];
-                                inner_mutators = inner_mutators + &generate_mutator_str(&arg_name[..], arg, &co[..], &to_mutator(&ops[..])[..], Some(name))[..];
-                                get_args = format!("{}get_{}(&self), ", get_args, arg_name);
-                                set_args = format!("{}set_{}(self, vals.{});\n", set_args, arg_name, i);
-                                bit_offset += size;
-                                // Current offset needs to be recalculated for each arg
-                                co = current_offset(bit_offset, &offset_fns[..]);
-                            } else {
-                                ecx.span_err(field.span, "arguments to #[construct_with] must be primitives");
-                                error = true;
-                            }
-                        }
-                        if mut_ {
-                            mutators = mutators + &format!("
-                            /// Set the value of the {name} field
-                            #[inline]
-                            #[allow(trivial_numeric_casts)]
-                            pub fn set_{name}(&mut self, val: {ty_str}) {{
-                                use pnet::packet::PrimitiveValues;
-                                {inner_mutators}
-
-                                let vals = val.to_primitive_values();
-
-                                {set_args}
-                            }}
-                            ", name = field_name,
-                               ty_str = ty_str,
-                               inner_mutators = inner_mutators,
-                               set_args = set_args)[..];
-                        }
-                        let ctor = if construct_with.len() > 0 {
-                            format!("{} {}::new({})", inner_accessors, ty_str, &get_args[..get_args.len() - 2])
-                        } else {
-                            format!("let current_offset = {};
-
-                                    {}::new(&self.packet[current_offset..])", co, ty_str)
-                        };
-                        accessors = accessors + &format!("
-                            /// Get the value of the {name} field
-                            #[inline]
-                            #[allow(trivial_numeric_casts)]
-                            pub fn get_{name}(&self) -> {ty_str} {{
-                                {ctor}
-                            }}
-                            ", name = field_name, ty_str = ty_str, ctor = ctor)[..];
-                    }
-                },
-                ref banana => {
-                    panic!("unhandled field type: {:?}, {:?}", field_name, banana);
-                }
-            }
-            if has_length_fn {
-                offset_fns.push(length_fn.unwrap());
-            }
-        } else {
-            ecx.span_err(field.span, "all fields in a packet must be named");
-            error = true;
-        }
-    }
-
-    if !found_payload && !error {
-        ecx.span_err(*span, "#[packet]'s must contain a payload");
-        return None;
-    }
-
-    if error {
-        return None;
-    }
-
-    fn generate_set_fields(sd: &ast::StructDef) -> String {
-        let fields = &sd.fields;
-        let mut set_fields = String::new();
-        for ref field in fields.iter() {
-            match field.node.ident() {
-                Some(name) => {
-                    set_fields = set_fields +
-                                 &format!("self.set_{field}(packet.{field});\n",
-                                          field = name)[..];
-                },
-                None => panic!(),
-            }
-        }
-
-        set_fields
-    }
-
-    let set_fields = generate_set_fields(&sd);
-
-    let populate = if mut_ {
-        format!("/// Populates a {name}Packet using a {name} structure
-         #[inline]
-         pub fn populate(&mut self, packet: {name}) {{
-             {set_fields}
-         }}", name = &imm_name[..imm_name.len() - 6], set_fields = set_fields)
-    } else {
-        "".to_string()
-    };
-
-    let imp = ecx.parse_item(format!("impl<'a> {name}<'a> {{
-    /// Constructs a new {name}
-    #[inline]
-    pub fn new<'p>(packet: &'p {mut} [u8]) -> {name}<'p> {{
-        // TODO This should ensure the provided buffer is at least a minimum size so we can avoid
-        //      bounds checking in accessors/mutators
-        {name} {{ packet: packet }}
-    }}
-
-    /// Maps from a {name} to a {imm_name}
-    #[inline]
-    pub fn to_immutable<'p>(&'p self) -> {imm_name}<'p> {{
-        match *self {{
-            {name} {{ ref packet }} => {imm_name} {{ packet: packet }}
-        }}
-    }}
-
-    {populate}
-
-    {accessors}
-
-    {mutators}
-}}", name = name,
-     imm_name = imm_name,
-     mut = if mut_ { "mut"} else { "" },
-     accessors = accessors,
-     mutators = mutators,
-     populate = populate
-     ));
-
-    let co = current_offset(bit_offset, &offset_fns[..]);
-    Some((co, imp))
 }
 

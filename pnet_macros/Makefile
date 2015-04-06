@@ -2,6 +2,8 @@
 COMPILETEST=compiletest
 # Path to rustc
 RUSTC=rustc
+# Path to Cargo
+CARGO=cargo
 # pnet_macros library path
 PNET_MACROS=$(shell ls target/debug/libpnet_macros*.so)
 # pnet library path
@@ -15,5 +17,6 @@ COMPILETEST_ARGS=--compile-lib-path "" --run-lib-path "" --rustc-path $(RUSTC) -
 				 "--extern pnet=$(PNET) --extern pnet_macros=$(PNET_MACROS)"
 
 test:
+	$(CARGO) test
 	mkdir -p target/tests
 	$(COMPILETEST) --mode compile-fail $(COMPILETEST_ARGS) compile-fail

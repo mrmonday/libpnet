@@ -126,7 +126,7 @@
 
 #![warn(missing_docs)]
 
-#![feature(core, plugin_registrar, quote, rustc_private)]
+#![feature(core, collections, plugin_registrar, quote, rustc_private)]
 
 extern crate syntax;
 extern crate regex;

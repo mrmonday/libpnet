@@ -52,7 +52,15 @@ build_test() {
     fi
 }
 
+run_macro_tests() {
+    #cd pnet_macros &&
+    #make test &&
+    #cd ..
+    true
+}
+
 run_test() {
+    run_macro_tests &&
     build_test &&
     echo "Setting permissions for test suite - enter sudo password if prompted" &&
     case "$SYSTEM" in
