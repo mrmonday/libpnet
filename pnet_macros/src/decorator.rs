@@ -72,107 +72,132 @@ fn make_type(ty_str: String) -> Type {
     }
 }
 
-fn make_packets(ecx: &mut ExtCtxt, span: Span, item: &ast::Item) -> Option<Vec<Packet>> {
-    match item.node {
-        ast::ItemEnum(..) => unimplemented!(),
-        ast::ItemStruct(ref sd, ref _gs) => {
-            let name = item.ident.as_str().to_string();
+fn make_packet(ecx: &mut ExtCtxt, span: Span, name: String, sd: &ast::StructDef) -> Option<Packet> {
+    let mut payload_span = None;
+    let mut fields = Vec::new();
 
-            let mut payload_span = None;
-            let mut fields = Vec::new();
-
-            for ref field in &sd.fields {
-                let field_name = match field.node.ident() {
-                    Some(name) => name.to_string(),
-                    None => {
-                        ecx.span_err(field.span, "all fields in a packet must be named");
+    for ref field in &sd.fields {
+        let field_name = match field.node.ident() {
+            Some(name) => name.to_string(),
+            None => {
+                ecx.span_err(field.span, "all fields in a packet must be named");
+                return None;
+            }
+        };
+        let mut is_payload = false;
+        let mut length_fn = None;
+        let mut construct_with = Vec::new();
+        let mut seen = Vec::new();
+        for attr in field.node.attrs.iter() {
+            let ref node = attr.node.value.node;
+            match node {
+                &ast::MetaWord(ref s) => {
+                    seen.push(s.to_string());
+                    if &s[..] == "payload" {
+                        if payload_span.is_some() {
+                            ecx.span_err(field.span, "packet may not have multiple payloads");
+                            ecx.span_note(payload_span.unwrap(), "first payload defined here");
+                            return None;
+                        }
+                        is_payload = true;
+                        payload_span = Some(field.span);
+                    } else {
+                        ecx.span_err(field.span, &format!("unknown attribute: {}", s)[..]);
                         return None;
                     }
-                };
-                let mut is_payload = false;
-                let mut length_fn = None;
-                let mut construct_with = Vec::new();
-                let mut seen = Vec::new();
-                for attr in field.node.attrs.iter() {
-                    let ref node = attr.node.value.node;
-                    match node {
-                        &ast::MetaWord(ref s) => {
-                            seen.push(s.to_string());
-                            if &s[..] == "payload" {
-                                if payload_span.is_some() {
-                                    ecx.span_err(field.span, "packet may not have multiple payloads");
-                                    ecx.span_note(payload_span.unwrap(), "first payload defined here");
-                                    return None;
-                                }
-                                is_payload = true;
-                                payload_span = Some(field.span);
+                },
+                &ast::MetaList(ref s, ref items) => {
+                    seen.push(s.to_string());
+                    if &s[..] == "construct_with" {
+                        if items.iter().len() == 0 {
+                            ecx.span_err(field.span, "#[construct_with] must have at least one argument");
+                            return None;
+                        }
+                        for ty in items.iter() {
+                            if let ast::MetaWord(ref s) = ty.node {
+                                construct_with.push(make_type(s.to_string()));
                             } else {
-                                ecx.span_err(field.span, &format!("unknown attribute: {}", s)[..]);
-                                return None;
-                            }
-                        },
-                        &ast::MetaList(ref s, ref items) => {
-                            seen.push(s.to_string());
-                            if &s[..] == "construct_with" {
-                                if items.iter().len() == 0 {
-                                    ecx.span_err(field.span, "#[construct_with] must have at least one argument");
-                                    return None;
-                                }
-                                for ty in items.iter() {
-                                    if let ast::MetaWord(ref s) = ty.node {
-                                        construct_with.push(make_type(s.to_string()));
-                                    } else {
-                                        ecx.span_err(field.span, "#[construct_with] should be of the form #[construct_with(<types>)]");
-                                        return None;
-                                    }
-                                }
-                            } else {
-                                ecx.span_err(field.span, &format!("unknown attribute: {}", s)[..]);
-                                return None;
-                            }
-                        },
-                        &ast::MetaNameValue(ref s, ref lit) => {
-                            seen.push(s.to_string());
-                            if &s[..] == "length_fn" {
-                                let ref node = lit.node;
-                                if let &ast::LitStr(ref s, _) = node {
-                                    length_fn = Some(s.to_string());
-                                } else {
-                                    ecx.span_err(field.span, "#[length_fn] should be used as #[length_fn = \"name_of_function\"]");
-                                    return None;
-                                }
-                            } else {
-                                ecx.span_err(field.span, &format!("unknown attribute: {}", s)[..]);
+                                ecx.span_err(field.span, "#[construct_with] should be of the form #[construct_with(<types>)]");
                                 return None;
                             }
                         }
+                    } else {
+                        ecx.span_err(field.span, &format!("unknown attribute: {}", s)[..]);
+                        return None;
+                    }
+                },
+                &ast::MetaNameValue(ref s, ref lit) => {
+                    seen.push(s.to_string());
+                    if &s[..] == "length_fn" {
+                        let ref node = lit.node;
+                        if let &ast::LitStr(ref s, _) = node {
+                            length_fn = Some(s.to_string());
+                        } else {
+                            ecx.span_err(field.span, "#[length_fn] should be used as #[length_fn = \"name_of_function\"]");
+                            return None;
+                        }
+                    } else {
+                        ecx.span_err(field.span, &format!("unknown attribute: {}", s)[..]);
+                        return None;
                     }
                 }
-                let old_len = seen.len();
-                seen.dedup();
-                if seen.len() != old_len {
-                    ecx.span_err(field.span, "cannot have two attributes with the same name");
+            }
+        }
+        let old_len = seen.len();
+        seen.dedup();
+        if seen.len() != old_len {
+            ecx.span_err(field.span, "cannot have two attributes with the same name");
+        }
+
+        fields.push(Field {
+            name: field_name,
+            span: field.span,
+            ty: make_type(field.node.ty.to_source()),
+            length_fn: length_fn,
+            is_payload: is_payload,
+            construct_with: Some(construct_with),
+        });
+    }
+
+    if payload_span.is_none() {
+        ecx.span_err(span, "#[packet]'s must contain a payload");
+        return None;
+    }
+
+    Some(Packet {
+        base_name: name,
+        fields: fields,
+    })
+
+}
+
+fn make_packets(ecx: &mut ExtCtxt, span: Span, item: &ast::Item) -> Option<Vec<Packet>> {
+    match item.node {
+        ast::ItemEnum(ref ed, ref _gs) => {
+            let mut vec = vec![];
+            for ref variant in &ed.variants {
+                if let ast::StructVariantKind(ref sd) = variant.node.kind {
+                    let name = variant.node.name.as_str().to_string();
+                    if let Some(packet) = make_packet(ecx, span, name, sd) {
+                        vec.push(packet);
+                    } else {
+                        return None;
+                    }
+                } else {
+                    ecx.span_err(variant.span, "");
+                    return None;
                 }
-
-                fields.push(Field {
-                    name: field_name,
-                    span: field.span,
-                    ty: make_type(field.node.ty.to_source()),
-                    length_fn: length_fn,
-                    is_payload: is_payload,
-                    construct_with: Some(construct_with),
-                });
             }
 
-            if payload_span.is_none() {
-                ecx.span_err(span, "#[packet]'s must contain a payload");
-                return None;
+            Some(vec)
+        },
+        ast::ItemStruct(ref sd, ref _gs) => {
+            let name = item.ident.as_str().to_string();
+            if let Some(packet) = make_packet(ecx, span, name, sd) {
+                Some(vec![packet])
+            } else {
+                None
             }
-
-            Some(vec![Packet {
-                base_name: name,
-                fields: fields,
-            }])
         },
         _ => {
             ecx.span_err(span, "#[packet] may only be used with enums and structs");
