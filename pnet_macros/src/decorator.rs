@@ -61,14 +61,19 @@ impl Packet {
     }
 }
 
-fn make_type(ty_str: String) -> Type {
+fn make_type(ty_str: String) -> Result<Type, String> {
     if let Some((size, endianness)) = parse_ty(&ty_str[..]) {
-        Type::Primitive(ty_str, size, endianness)
+        Ok(Type::Primitive(ty_str, size, endianness))
     } else if ty_str.starts_with("Vec<") {
         let ty = make_type(String::from_str(&ty_str[4..ty_str.len()-1]));
-        Type::Vector(Box::new(ty))
+        match ty {
+            Ok(ty) => Ok(Type::Vector(Box::new(ty))),
+            Err(e) => Err(e),
+        }
+    } else if ty_str.starts_with("&") {
+        Err(format!("invalid type: {}", ty_str))
     } else {
-        Type::Misc(ty_str)
+        Ok(Type::Misc(ty_str))
     }
 }
 
@@ -115,7 +120,13 @@ fn make_packet(ecx: &mut ExtCtxt, span: Span, name: String, sd: &ast::StructDef)
                         }
                         for ty in items.iter() {
                             if let ast::MetaWord(ref s) = ty.node {
-                                construct_with.push(make_type(s.to_string()));
+                                match make_type(s.to_string()) {
+                                    Ok(ty) => construct_with.push(ty),
+                                    Err(e) => {
+                                        ecx.span_err(field.span, &e);
+                                        return None;
+                                    }
+                                }
                             } else {
                                 ecx.span_err(field.span, "#[construct_with] should be of the form #[construct_with(<types>)]");
                                 return None;
@@ -147,12 +158,39 @@ fn make_packet(ecx: &mut ExtCtxt, span: Span, name: String, sd: &ast::StructDef)
         seen.dedup();
         if seen.len() != old_len {
             ecx.span_err(field.span, "cannot have two attributes with the same name");
+            return None;
+        }
+
+        let ty = match make_type(field.node.ty.to_source()) {
+            Ok(ty) => ty,
+            Err(e) => {
+                ecx.span_err(field.span, &e);
+                return None;
+            }
+        };
+
+        match ty {
+            Type::Vector(_) => {
+                if !is_payload && length_fn.is_none() {
+                    ecx.span_err(field.span,
+                                 "variable length field must have #[length_fn = \"\"] attribute");
+                    return None;
+                }
+            },
+            Type::Misc(_) => {
+                if construct_with.is_empty() {
+                    ecx.span_err(field.span,
+                                 "non-primitive field types must specify #[construct_with]");
+                    return None;
+                }
+            },
+            _ => {}
         }
 
         fields.push(Field {
             name: field_name,
             span: field.span,
-            ty: make_type(field.node.ty.to_source()),
+            ty: ty,
             length_fn: length_fn,
             is_payload: is_payload,
             construct_with: Some(construct_with),

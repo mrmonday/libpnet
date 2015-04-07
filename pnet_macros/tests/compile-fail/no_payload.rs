@@ -12,7 +12,7 @@
 extern crate pnet;
 
 #[packet] //~ ERROR: #[packet]'s must contain a payload
-struct Test {
+pub struct Test {
     banana: u8
 }
 

@@ -12,12 +12,12 @@
 extern crate pnet;
 
 #[packet]
-struct PacketWithPayload<'a> {
+struct PacketWithPayload {
     banana: u8,
     #[length_fn = "length_fn"]
-    var_length: &'a [u8], //~ ERROR: length_fn must be of type &PacketWithPayloadHeader -> usize
+    var_length: Vec<u8>, //~ ERROR: length_fn must be of type &PacketWithPayloadHeader -> usize
     #[payload]
-    payload: &'a [u8]
+    payload: Vec<u8>
 }
 
 fn length_fn(_: ()) -> usize {

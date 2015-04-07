@@ -12,12 +12,12 @@
 extern crate pnet;
 
 #[packet]
-struct PacketWithPayload<'a> {
+struct PacketWithPayload {
     #[length_fn = ""]
     #[payload]
-    payload1: &'a [u8],  //~ NOTE first payload defined here
+    payload1: Vec<u8>,  //~ NOTE first payload defined here
     #[payload]
-    payload2: &'a [u8]   //~ ERROR packet may not have multiple payloads
+    payload2: Vec<u8>   //~ ERROR packet may not have multiple payloads
 }
 
 

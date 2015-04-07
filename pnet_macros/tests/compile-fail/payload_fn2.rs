@@ -12,11 +12,10 @@
 extern crate pnet;
 
 #[packet]
-struct PacketWithPayload2<'a> {
+pub struct PacketWithPayload2 {
     banana: u8,
     #[payload(length_fn = "length_of_payload")]
-    payload: &'a [u8] //~ ERROR: #[payload] attribute has no arguments
-    //~^ ERROR: variable length field must have #[length_fn = ""] attribute
+    payload: Vec<u8> //~ ERROR: unknown attribute: payload
 }
 
 fn length_of_payload(_: &PacketWithPayload2Packet) -> usize {
