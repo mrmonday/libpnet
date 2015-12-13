@@ -1,5 +1,7 @@
 language: rust
-rust: nightly
+rust:
+    - beta
+    - nightly
 os:
     - linux
     - osx
@@ -9,9 +11,6 @@ env:
     - VERBOSE: 1
 script:
     - make travis_script
-after_script:
-    - cd target
-    - curl http://www.rust-ci.org/artifacts/put?t=$RUSTCI_TOKEN | sudo sh
 notifications:
     irc:
         channels:

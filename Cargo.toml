@@ -1,6 +1,6 @@
 [package]
 name = "pnet"
-version = "0.6.1"
+version = "0.7.0"
 authors = [ "Robert Clipsham <robert@octarineparrot.com>" ]
 license = "MIT/Apache-2.0"
 homepage = "https://github.com/libpnet/libpnet"
@@ -15,10 +15,11 @@ build = "build.rs"
 name = "pnet"
 
 [features]
-default = ["clippy"]
+default = ["with-syntex"]
 netmap = ["netmap_sys"]
 appveyor = []
 travis = []
+with-syntex = ["syntex"]
 
 [dependencies.clippy]
 optional = true
@@ -32,9 +33,13 @@ version = ">=0.0"
 [dependencies.libc]
 version = "=0.1.12"
 
+[dependencies.syntex]
+version = ">=0.22.0"
+optional = true
+
 [dependencies.pnet_macros]
 path = "pnet_macros"
-version = ">=0.6"
+version = ">=0.7"
 
 [dependencies.pnet_macros_support]
 path = "pnet_macros"
@@ -42,3 +47,7 @@ version = ">=0.1"
 
 [dev-dependencies]
 time = ">=0.1"
+
+[build-dependencies]
+syntex = { version = ">=0.22.0", optional = true }
+pnet_macros = { path = "pnet_macros", version = ">=0.6" }

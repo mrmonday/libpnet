@@ -107,9 +107,8 @@
 
 #![deny(missing_docs)]
 
-// FIXME Remove this once the std lib has stabilised
-#![feature(custom_attribute, plugin)]
-#![plugin(pnet_macros)]
+#![cfg_attr(not(feature = "with-syntex"), feature(custom_attribute, plugin))]
+#![cfg_attr(not(feature = "with-syntex"), plugin(pnet_macros))]
 #![cfg_attr(feature="clippy", plugin(clippy))]
 // See: https://github.com/Manishearth/rust-clippy/issues/373
 #![cfg_attr(feature="clippy", allow(explicit_counter_loop))]
