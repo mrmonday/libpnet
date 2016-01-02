@@ -613,9 +613,9 @@ fn handle_vector_field(cx: &mut GenContext,
                                 pub fn get_{name}_raw(&self) -> &[u8] {{
                                     let _self = self;
                                     let current_offset = {co};
-                                    let len = {packet_length};
+                                    let end = current_offset + {packet_length};
 
-                                    &_self.packet[current_offset..len]
+                                    &_self.packet[current_offset..end]
                                 }}
                                 ",
                                 accessors = accessors,
@@ -630,9 +630,9 @@ fn handle_vector_field(cx: &mut GenContext,
                                 pub fn get_{name}_raw_mut(&mut self) -> &mut [u8] {{
                                     let _self = self;
                                     let current_offset = {co};
-                                    let len = {packet_length};
+                                    let end = current_offset + {packet_length};
 
-                                    &mut _self.packet[current_offset..len]
+                                    &mut _self.packet[current_offset..end]
                                 }}
                                 ",
                                 mutators = mutators,
@@ -658,10 +658,10 @@ fn handle_vector_field(cx: &mut GenContext,
                                     use pnet::packet::FromPacket;
                                     let _self = self;
                                     let current_offset = {co};
-                                    let len = {packet_length};
+                                    let end = current_offset + {packet_length};
 
                                     {inner_ty_str}Iterable {{
-                                        buf: &_self.packet[current_offset..len]
+                                        buf: &_self.packet[current_offset..end]
                                     }}.map(|packet| packet.from_packet())
                                       .collect::<Vec<_>>()
                                 }}
@@ -680,12 +680,12 @@ fn handle_vector_field(cx: &mut GenContext,
                                     use pnet::packet::PacketSize;
                                     let _self = self;
                                     let mut current_offset = {co};
-                                    let len = {packet_length};
+                                    let end = current_offset + {packet_length};
                                     for val in vals.into_iter() {{
                                         let mut packet = Mutable{inner_ty_str}Packet::new(&mut _self.packet[current_offset..]).unwrap();
                                         packet.populate(val);
                                         current_offset += packet.packet_size();
-                                        assert!(current_offset <= len);
+                                        assert!(current_offset <= end);
                                     }}
                                 }}
                                 ",

@@ -1,4 +1,4 @@
-// Copyright (c) 2015 Robert Clipsham <robert@octarineparrot.com>
+// Copyright (c) 2014, 2015 Robert Clipsham <robert@octarineparrot.com>
 //
 // Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
 // http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
@@ -13,4 +13,3 @@ include!(concat!(env!("OUT_DIR"), "/ipv4.rs"));
 
 #[cfg(not(feature = "with-syntex"))]
 include!("ipv4.rs.in");
-
