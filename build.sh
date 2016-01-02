@@ -36,8 +36,7 @@ fi
 IFCONFIG=$(which ifconfig)
 IPROUTE2=$(which ip)
 
-$RUSTC -V | grep -q nightly
-$? && NIGHTLY=1
+$RUSTC -V | grep -q nightly && NIGHTLY=1
 
 if [[ -x "$IFCONFIG" ]]; then
     PNET_TEST_IFACE=$($IFCONFIG | egrep 'UP| active' | \
