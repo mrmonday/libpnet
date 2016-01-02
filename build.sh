@@ -21,13 +21,13 @@ CC=$(which clang || which gcc)
 NIGHTLY=0
 
 if [[ -n "$PNET_FEATURES" ]]; then
-    PNET_CARGO_FLAGS="--no-default-features --features $PNET_FEATURES"
+    PNET_CARGO_FLAGS="--no-default-features --features \"$PNET_FEATURES\""
 else
     PNET_CARGO_FLAGS=
 fi
 
 if [[ -n "$PNET_MACROS_FEATURES" ]]; then
-    PNET_MACROS_CARGO_FLAGS="--no-default-features --features $PNET_MACROS_FEATURES"
+    PNET_MACROS_CARGO_FLAGS="--no-default-features --features \"$PNET_MACROS_FEATURES\""
 else
     PNET_MACROS_CARGO_FLAGS=
 fi
