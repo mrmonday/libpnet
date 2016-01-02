@@ -98,7 +98,7 @@ run_macro_tests() {
 }
 
 run_test() {
-    run_macro_tests
+    run_macro_tests &&
     export RUST_TEST_THREADS=1 &&
     case "$SYSTEM" in
         Linux)
