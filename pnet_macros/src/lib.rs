@@ -156,7 +156,6 @@ extern crate syntax;
 
 extern crate regex;
 
-//#[cfg_attr(not(feature = "with-syntex"), macro_use)]
 #[cfg(not(feature = "with-syntex"))]
 extern crate rustc_plugin;
 
@@ -181,7 +180,7 @@ fn mw(ecx: &mut ExtCtxt, span: Span, word: &'static str) -> P<ast::MetaItem> {
 /// Replace the #[packet] attribute with internal attributes
 ///
 /// The #[packet] attribute is consumed, so we replace it with two internal attributes,
-/// #[_packet_generator], which is used to generate the packet implementations, and
+/// #[packet_generator], which is used to generate the packet implementations, and
 fn packet_modifier(ecx: &mut ExtCtxt,
                    span: Span,
                    _meta_item: &ast::MetaItem,
@@ -189,7 +188,7 @@ fn packet_modifier(ecx: &mut ExtCtxt,
     let item = item.expect_item();
     let mut new_item = (*item).clone();
 
-    let packet_generator = mw(ecx, span, "_packet_generator");
+    let packet_generator = mw(ecx, span, "packet_generator");
     let clone = mw(ecx, span, "Clone");
     let debug = mw(ecx, span, "Debug");
     let unused_attrs = mw(ecx, span, "unused_attributes");
@@ -220,7 +219,7 @@ fn packet_modifier(ecx: &mut ExtCtxt,
 pub fn plugin_registrar(registry: &mut rustc_plugin::Registry) {
     registry.register_syntax_extension(token::intern("packet"),
                                        MultiModifier(Box::new(packet_modifier)));
-    registry.register_syntax_extension(token::intern("_packet_generator"),
+    registry.register_syntax_extension(token::intern("packet_generator"),
                                        MultiDecorator(Box::new(decorator::generate_packet)));
 }
 
@@ -293,6 +292,6 @@ fn remove_attributes(mut krate: ast::Crate) -> ast::Crate {
 /// The entry point for the plugin when using syntex
 pub fn register(registry: &mut syntex::Registry) {
     registry.add_modifier("packet", packet_modifier);
-    registry.add_decorator("_packet_generator", decorator::generate_packet);
+    registry.add_decorator("packet_generator", decorator::generate_packet);
     registry.add_post_expansion_pass(remove_attributes);
 }
