@@ -209,21 +209,8 @@ fn packet_modifier(ecx: &mut ExtCtxt,
     Annotatable::Item(P(new_item))
 }
 
-/// The entry point for the syntax extension
-///
-/// This registers each part of the plugin with the compiler. There are two parts: a modifier, to
-/// add additional attributes to the original structure; and a decorator, to generate the various
-/// required structures and method.
-#[cfg_attr(not(feature = "with-syntex"), plugin_registrar)]
-#[cfg(not(feature = "with-syntex"))]
-pub fn plugin_registrar(registry: &mut rustc_plugin::Registry) {
-    registry.register_syntax_extension(token::intern("packet"),
-                                       MultiModifier(Box::new(packet_modifier)));
-    registry.register_syntax_extension(token::intern("packet_generator"),
-                                       MultiDecorator(Box::new(decorator::generate_packet)));
-}
-
 /// Helper function to get mutable access to the fields in a struct/enum
+#[cfg(feature = "with-syntex")]
 fn variant_data_fields(vd: &mut ast::VariantData) -> &mut [ast::StructField] {
     match *vd {
         ast::VariantData::Struct(ref mut fields, _) => fields,
@@ -233,6 +220,7 @@ fn variant_data_fields(vd: &mut ast::VariantData) -> &mut [ast::StructField] {
 }
 
 /// Removes the attributes we've introduced from a particular struct/enum
+#[cfg(feature = "with-syntex")]
 fn remove_attributes_struct(vd: &mut ast::VariantData) {
     for field in variant_data_fields(vd) {
         let mut attrs = &mut field.node.attrs;
@@ -254,6 +242,7 @@ fn remove_attributes_struct(vd: &mut ast::VariantData) {
 
 /// This iterates through a crate and removes any references to attributes
 /// which we introduce but aren't already consumed
+#[cfg(feature = "with-syntex")]
 fn remove_attributes(mut krate: ast::Crate) -> ast::Crate {
     let mut new_items = Vec::with_capacity(krate.module.items.len());
     for item in &krate.module.items {
@@ -290,8 +279,23 @@ fn remove_attributes(mut krate: ast::Crate) -> ast::Crate {
 }
 
 /// The entry point for the plugin when using syntex
+#[cfg(feature = "with-syntex")]
 pub fn register(registry: &mut syntex::Registry) {
     registry.add_modifier("packet", packet_modifier);
     registry.add_decorator("packet_generator", decorator::generate_packet);
     registry.add_post_expansion_pass(remove_attributes);
 }
+
+/// The entry point for the syntax extension
+///
+/// This registers each part of the plugin with the compiler. There are two parts: a modifier, to
+/// add additional attributes to the original structure; and a decorator, to generate the various
+/// required structures and method.
+#[cfg(not(feature = "with-syntex"))]
+pub fn register(registry: &mut rustc_plugin::Registry) {
+    registry.register_syntax_extension(token::intern("packet"),
+                                       MultiModifier(Box::new(packet_modifier)));
+    registry.register_syntax_extension(token::intern("packet_generator"),
+                                       MultiDecorator(Box::new(decorator::generate_packet)));
+}
+

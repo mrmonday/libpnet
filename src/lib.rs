@@ -107,8 +107,8 @@
 
 #![deny(missing_docs)]
 
-#![cfg_attr(not(feature = "with-syntex"), feature(custom_attribute, plugin))]
-#![cfg_attr(not(feature = "with-syntex"), plugin(pnet_macros))]
+#![cfg_attr(feature = "nightly", feature(custom_attribute, plugin))]
+#![cfg_attr(feature = "nightly", plugin(pnet_macros_plugin))]
 #![cfg_attr(feature="clippy", plugin(clippy))]
 // See: https://github.com/Manishearth/rust-clippy/issues/373
 #![cfg_attr(feature="clippy", allow(explicit_counter_loop))]

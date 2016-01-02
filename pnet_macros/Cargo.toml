@@ -15,7 +15,7 @@ keywords = ["networking", "bitfields", "packet", "protocol"]
 name = "pnet_macros"
 
 [features]
-default = ["with-syntex"]
+default = []
 travis = []
 with-syntex = ["syntex", "syntex_syntax"]
 

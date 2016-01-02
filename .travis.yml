@@ -11,16 +11,16 @@ env:
     - VERBOSE: 1
   matrix:
     - PNET_FEATURES="travis with-syntex" PNET_MACROS_FEATURES="travis with-syntex"
-    - PNET_FEATURES="travis clippy" PNET_MACROS_FEATURES="travis clippy"
-    - PNET_FEATURES="travis" PNET_MACROS_FEATURES="travis"
+    - PNET_FEATURES="travis nightly clippy" PNET_MACROS_FEATURES="travis clippy"
+    - PNET_FEATURES="travis nightly" PNET_MACROS_FEATURES="travis"
 matrix:
   allow_failures:
-    - env: PNET_FEATURES="travis clippy" PNET_MACROS_FEATURES="travis clippy"
+    - env: PNET_FEATURES="travis nightly clippy" PNET_MACROS_FEATURES="travis clippy"
   exclude:
     - rust: beta
-      env: PNET_FEATURES="travis clippy" PNET_MACROS_FEATURES="travis clippy"
+      env: PNET_FEATURES="travis nightly clippy" PNET_MACROS_FEATURES="travis clippy"
     - rust: beta
-      env: PNET_FEATURES="travis" PNET_MACROS_FEATURES="travis"
+      env: PNET_FEATURES="travis nightly" PNET_MACROS_FEATURES="travis"
 script:
     - make travis_script
 notifications:
