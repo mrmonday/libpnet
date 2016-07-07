@@ -9,11 +9,10 @@
 //! Implements the #[packet] decorator
 
 use regex::Regex;
-use std::rc::Rc;
 
 use syntax::ast;
-use syntax::ast::Delimited;
-use syntax::ast::TokenTree::{self, Sequence, Token};
+use syntax::tokenstream::Delimited;
+use syntax::tokenstream::TokenTree::{self, Sequence, Token};
 use syntax::codemap::Span;
 use syntax::ext::base::{Annotatable, ExtCtxt};
 use syntax::ext::quote::rt::ExtParseUtils;
@@ -325,16 +324,15 @@ fn parse_length_expr(ecx: &mut ExtCtxt, tts: &[TokenTree], field_names: &[String
                      (+ - * / %) and parentheses are allowed in the \"length\" attribute";
     let tokens_packet = tts.iter().fold(Vec::new(), |mut acc_packet, tt_token| {
         match *tt_token {
-            Token(span, token::Ident(name, token::IdentStyle::Plain)) => {
-                if name.to_string().chars().any(|c| c.is_lowercase()) {
-                    if field_names.contains(&name.to_string()) {
+            Token(_, token::Ident(name)) => {
+                let name_str = name.to_string();
+                if name_str.chars().any(|c| c.is_lowercase()) {
+                    if field_names.contains(&name_str) {
                         let mut modified_packet_tokens = ecx.parse_tts(
                             format!("_self.get_{}() as usize", name).to_owned());
                         acc_packet.append(&mut modified_packet_tokens);
                     } else {
-                        ecx.span_err(
-                            span,
-                            "Field name must be a member of the struct and not the field itself");
+                        acc_packet.push(tt_token.clone());
                     }
                 }
                 // Constants are only recongized if they are all uppercase
@@ -343,9 +341,6 @@ fn parse_length_expr(ecx: &mut ExtCtxt, tts: &[TokenTree], field_names: &[String
                         format!("{} as usize", name).to_owned());
                     acc_packet.append(&mut modified_packet_tokens);
                 }
-            },
-            Token(_, token::Ident(_, token::IdentStyle::ModName)) => {
-                acc_packet.push(tt_token.clone());
             },
             Token(_, token::ModSep) => {
                 acc_packet.push(tt_token.clone());
@@ -374,7 +369,7 @@ fn parse_length_expr(ecx: &mut ExtCtxt, tts: &[TokenTree], field_names: &[String
                     tts: tts,
                     close_span: delimited.close_span
                 };
-                acc_packet.push(TokenTree::Delimited(span, Rc::new(tt_delimited)));
+                acc_packet.push(TokenTree::Delimited(span, tt_delimited));
             },
             Sequence(span, _) => {
                 ecx.span_err(span, error_msg);
@@ -1193,7 +1188,7 @@ fn generate_get_fields(packet: &Packet) -> String {
 #[cfg(test)]
 mod tests {
     use syntax::ast::CrateConfig;
-    use syntax::ext::base::ExtCtxt;
+    use syntax::ext::base::{DummyMacroLoader, ExtCtxt};
     use syntax::ext::expand::ExpansionConfig;
     use syntax::ext::quote::rt::ExtParseUtils;
     use syntax::parse::ParseSess;
@@ -1201,11 +1196,11 @@ mod tests {
 
     fn assert_parse_length_expr(expr: &str, field_names: &[&str], expected: &str) {
         let sess = ParseSess::new();
-        let mut feature_gated_cfgs = Vec::new();
+        let mut dummy_macro_loader = DummyMacroLoader;
         let mut ecx = ExtCtxt::new(&sess,
                                    CrateConfig::default(),
                                    ExpansionConfig::default("parse_length_expr".to_owned()),
-                                   &mut feature_gated_cfgs);
+                                   &mut dummy_macro_loader);
         let expr_tokens = ecx.parse_tts(expr.to_owned());
         let field_names_vec: Vec<String> = field_names.iter()
                                                       .map(|field_name| (*field_name).to_owned())

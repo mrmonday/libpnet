@@ -47,7 +47,7 @@ mod macros {
             let mut registry = syntex::Registry::new();
             pnet_macros::register(&mut registry);
 
-            registry.expand("", &src, &dst).unwrap();
+            registry.expand("pnet", &src, &dst).unwrap();
         }
     }
 }

@@ -170,6 +170,8 @@ use syntax::ptr::P;
 
 #[cfg(not(feature = "with-syntex"))]
 use syntax::ext::base::{MultiDecorator, MultiModifier};
+#[cfg(not(feature = "with-syntex"))]
+use syntax::feature_gate::AttributeType;
 
 mod decorator;
 mod util;
@@ -229,7 +231,7 @@ fn remove_attributes_struct(vd: &mut ast::VariantData) {
         attrs.retain(|attr| {
             match attr.node.value.node {
                 ast::MetaItemKind::Word(ref s) => {
-                    *s != "payload"
+                    !(*s == "payload" || *s == "doc")
                 },
                 ast::MetaItemKind::List(ref s, _) => {
                     *s != "construct_with"
@@ -267,6 +269,23 @@ fn remove_attributes_mod(module: &mut ast::Mod) {
                 },
                 _ => {},
             }
+            println!("ok then");
+
+            {
+                let mut attrs = &mut item.attrs;
+                attrs.retain(|attr| {
+            println!("some attrs");
+                    match attr.node.value.node {
+                        ast::MetaItemKind::Word(ref s) => {
+                            true
+                            //*s != "packet"
+                        },
+                        _ => true,
+                    }
+                });
+            }
+            println!("orite");
+
 
             item
         });
@@ -288,8 +307,9 @@ fn remove_attributes(mut krate: ast::Crate) -> ast::Crate {
 /// The entry point for the plugin when using syntex
 #[cfg(feature = "with-syntex")]
 pub fn register(registry: &mut syntex::Registry) {
+    //registry.add_attr("packet");
     registry.add_modifier("packet", packet_modifier);
-    registry.add_decorator("packet_generator", decorator::generate_packet);
+    registry.add_decorator("packet", decorator::generate_packet);
     registry.add_post_expansion_pass(remove_attributes);
 }
 
@@ -300,6 +320,7 @@ pub fn register(registry: &mut syntex::Registry) {
 /// required structures and method.
 #[cfg(not(feature = "with-syntex"))]
 pub fn register(registry: &mut rustc_plugin::Registry) {
+    registry.register_attribute("packet".to_string(), AttributeType::Normal);
     registry.register_syntax_extension(token::intern("packet"),
                                        MultiModifier(Box::new(packet_modifier)));
     registry.register_syntax_extension(token::intern("packet_generator"),

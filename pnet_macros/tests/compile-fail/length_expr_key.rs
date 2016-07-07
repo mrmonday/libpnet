@@ -6,7 +6,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// error-pattern: error: Field name must be a member of the struct and not the field itself
+// error-pattern: error: unresolved name `tomato`
 
 #![feature(custom_attribute, plugin)]
 #![plugin(pnet_macros_plugin)]
