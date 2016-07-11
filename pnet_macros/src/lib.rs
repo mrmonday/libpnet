@@ -189,6 +189,8 @@ fn packet_modifier(ecx: &mut ExtCtxt,
                    span: Span,
                    _meta_item: &ast::MetaItem,
                    item: Annotatable) -> Annotatable {
+    panic!("c'mon...");
+
     let item = item.expect_item();
     let mut new_item = (*item).clone();
 
@@ -307,9 +309,10 @@ fn remove_attributes(mut krate: ast::Crate) -> ast::Crate {
 /// The entry point for the plugin when using syntex
 #[cfg(feature = "with-syntex")]
 pub fn register(registry: &mut syntex::Registry) {
+    //panic!("ddd");
     //registry.add_attr("packet");
     registry.add_modifier("packet", packet_modifier);
-    registry.add_decorator("packet", decorator::generate_packet);
+    registry.add_decorator("packet_generator", decorator::generate_packet);
     registry.add_post_expansion_pass(remove_attributes);
 }
 
@@ -321,6 +324,7 @@ pub fn register(registry: &mut syntex::Registry) {
 #[cfg(not(feature = "with-syntex"))]
 pub fn register(registry: &mut rustc_plugin::Registry) {
     registry.register_attribute("packet".to_string(), AttributeType::Normal);
+    registry.register_attribute("packet_generator".to_string(), AttributeType::Normal);
     registry.register_syntax_extension(token::intern("packet"),
                                        MultiModifier(Box::new(packet_modifier)));
     registry.register_syntax_extension(token::intern("packet_generator"),

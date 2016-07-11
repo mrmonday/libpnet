@@ -10,6 +10,8 @@
 
 use regex::Regex;
 
+use std::rc::Rc;
+
 use syntax::ast;
 use syntax::tokenstream::Delimited;
 use syntax::tokenstream::TokenTree::{self, Sequence, Token};
@@ -369,7 +371,7 @@ fn parse_length_expr(ecx: &mut ExtCtxt, tts: &[TokenTree], field_names: &[String
                     tts: tts,
                     close_span: delimited.close_span
                 };
-                acc_packet.push(TokenTree::Delimited(span, tt_delimited));
+                acc_packet.push(TokenTree::Delimited(span, Rc::new(tt_delimited)));
             },
             Sequence(span, _) => {
                 ecx.span_err(span, error_msg);
