@@ -230,10 +230,31 @@ fn variant_data_fields(vd: &mut ast::VariantData) -> &mut [ast::StructField] {
 fn remove_attributes_struct(vd: &mut ast::VariantData) {
     for field in variant_data_fields(vd) {
         let mut attrs = &mut field.attrs;
+        //for attr in attrs {
+        //    match attr.node.value.node {
+        //        ast::MetaItemKind::Word(ref s) => {
+        //            if *s == "payload" || *s == "doc" {
+        //                syntax::attr::mark_used(&attr);
+        //            }
+        //        },
+        //        ast::MetaItemKind::List(ref s, _) => {
+        //            if *s == "construct_with" {
+        //                syntax::attr::mark_used(&attr);
+        //            }
+        //        },
+        //        ast::MetaItemKind::NameValue(ref s, _) => {
+        //            if *s == "length_fn" || *s == "length" {
+        //                syntax::attr::mark_used(&attr);
+        //            }
+        //        },
+        //    }
+        //}
         attrs.retain(|attr| {
             match attr.node.value.node {
                 ast::MetaItemKind::Word(ref s) => {
-                    !(*s == "payload" || *s == "doc")
+                    syntax::attr::mark_used(&attr);
+
+                    return !(*s == "payload" || *s == "doc");
                 },
                 ast::MetaItemKind::List(ref s, _) => {
                     *s != "construct_with"
@@ -271,22 +292,22 @@ fn remove_attributes_mod(module: &mut ast::Mod) {
                 },
                 _ => {},
             }
-            println!("ok then");
-
-            {
-                let mut attrs = &mut item.attrs;
-                attrs.retain(|attr| {
-            println!("some attrs");
-                    match attr.node.value.node {
-                        ast::MetaItemKind::Word(ref s) => {
-                            true
-                            //*s != "packet"
-                        },
-                        _ => true,
-                    }
-                });
-            }
-            println!("orite");
+//            println!("ok then");
+//
+//            {
+//                let mut attrs = &mut item.attrs;
+//                attrs.retain(|attr| {
+//            println!("some attrs");
+//                    match attr.node.value.node {
+//                        ast::MetaItemKind::Word(ref s) => {
+//                            true
+//                            //*s != "packet"
+//                        },
+//                        _ => true,
+//                    }
+//                });
+//            }
+//            println!("orite");
 
 
             item
